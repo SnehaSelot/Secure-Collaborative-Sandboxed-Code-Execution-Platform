@@ -72,6 +72,11 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
                 nano_cpus=500_000_000,
                 pids_limit=64,
                 network_disabled=True,
+                ulimits=[
+                    docker.types.Ulimit(name="nofile", soft=2048, hard=2048),       #type: ignore
+                    docker.types.Ulimit(name="fsize", soft=10_000_000, hard=10_000_000),    #type: ignore
+                ],
+                environment=["HOME=/tmp"],
             )
 
             try:
