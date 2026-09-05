@@ -1,6 +1,9 @@
 import tempfile
 import time
 import os
+import shutil
+import uuid
+from contextlib import contextmanager
 
 import docker
 from docker.errors import APIError, ContainerError, ImageNotFound
@@ -39,16 +42,44 @@ FILE_EXT = {
 TIMEOUT_SECONDS = 10
 CODE_MOUNT_DIR = "/code"
 
-
 MAX_OUTPUT_CHARS = 20_000
-
-# Most language base images have a world-writable /tmp (mode 1777), so a
-# non-root UID can still write build output there. Verified OK for
-# python/node/gcc/rust images; double-check eclipse-temurin (java) and
-# golang:alpine specifically if you hit permission errors after this change —
-# if one image's /tmp isn't world-writable, drop `user=` for that language
-# only rather than removing it everywhere.
 EXEC_UID = "1000:1000"
+
+# Container-side path for the shared code workspace, bind-mounted from the
+# host in docker-compose.yml (./backend/exec_tmp:/exec_tmp). Only used when
+# EXEC_TMP_HOST_PATH is set — see _code_workspace() below.
+EXEC_TMP_CONTAINER_DIR = os.environ.get("EXEC_TMP_CONTAINER_DIR", "/exec_tmp")
+
+
+@contextmanager
+def _code_workspace():
+    """
+    Yields (write_dir, bind_source_dir):
+      write_dir       — where THIS process should write the code file.
+      bind_source_dir — the path to hand docker-py's `volumes={...}` when
+                         spawning the sandbox container.
+
+    These are the same path in local dev (this process talks to Docker
+    directly). They differ when running via docker-compose with the host's
+    Docker socket mounted in: this process writes into its own container's
+    /exec_tmp, but the (host) Docker daemon resolves bind-mount sources
+    against the HOST filesystem — so the sandbox container's mount source
+    must be the HOST-side path (EXEC_TMP_HOST_PATH + the same run id),
+    which is bind-mounted to the same /exec_tmp location on both sides.
+    """
+    host_path = os.environ.get("EXEC_TMP_HOST_PATH")
+
+    if host_path:
+        run_id = uuid.uuid4().hex
+        write_dir = os.path.join(EXEC_TMP_CONTAINER_DIR, run_id)
+        os.makedirs(write_dir, exist_ok=True)
+        try:
+            yield write_dir, f"{host_path.rstrip('/')}/{run_id}"
+        finally:
+            shutil.rmtree(write_dir, ignore_errors=True)
+    else:
+        with tempfile.TemporaryDirectory() as d:
+            yield d, d
 
 
 def _truncate(text: str) -> str:
@@ -66,10 +97,10 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
     container = None
     start = time.time()
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
+    with _code_workspace() as (write_dir, bind_source):
         filename = f"main.{FILE_EXT[language]}"
-        host_path = os.path.join(tmp_dir, filename)
-        with open(host_path, "w") as f:
+        host_write_path = os.path.join(write_dir, filename)
+        with open(host_write_path, "w") as f:
             f.write(code)
 
         container_path = f"{CODE_MOUNT_DIR}/{filename}"
@@ -79,7 +110,7 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
             container = client.containers.run(
                 LANGUAGE_IMAGES[language],
                 command,
-                volumes={tmp_dir: {"bind": CODE_MOUNT_DIR, "mode": "ro"}},
+                volumes={bind_source: {"bind": CODE_MOUNT_DIR, "mode": "ro"}},
                 working_dir=CODE_MOUNT_DIR,
                 detach=True,
                 mem_limit="256m",

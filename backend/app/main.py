@@ -22,8 +22,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-# Loaded as app.main by uvicorn, so imports resolve from the project root
-# (backend/), not from inside app/ — hence the `app.` prefix here.
 from app.services.executor import (
     LANGUAGE_IMAGES,
     TIMEOUT_SECONDS,
@@ -36,9 +34,7 @@ logger = logging.getLogger("exec-service")
 
 app = FastAPI(title="Execution Service", version="0.1.0")
 
-# docker-py is synchronous; run it off the event loop so one slow/hanging
-# container doesn't stall every other request. Pool size = a rough cap on
-# concurrent running containers until real queuing/limits exist.
+
 _executor_pool = ThreadPoolExecutor(max_workers=8)
 _docker_client = None
 
