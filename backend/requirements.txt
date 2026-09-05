@@ -1,3 +1,4 @@
-fastapi
-uvicorn[standard]
-docker
+fastapi>=0.115
+uvicorn[standard]>=0.30
+docker>=7.1
+pydantic>=2.7
