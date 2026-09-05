@@ -1,16 +1,26 @@
-version: "29.7.2"
-
 services:
   api:
-    build: ./backend                       # builds from the Dockerfile in this folder
+    build: ./backend
     ports:
-      - "8000:8000"                 # host:container — hit localhost:8000
+      - "8000:8000" # host:container — hit localhost:8000
     environment:
       DATABASE_URL: postgresql://sandbox_user:sandbox_pass@postgres:5432/sandbox_db
+      # HOST-side path that maps to /exec_tmp inside this container. Needed
+      # because bind mounts we ask the (host) Docker daemon to create are
+      # resolved against the HOST filesystem, not this container's — see
+      # executor.py's _code_workspace(). Set HOST_PROJECT_DIR in your .env
+      # file (repo root) to this repo's ABSOLUTE path on your machine.
+      EXEC_TMP_HOST_PATH: ${HOST_PROJECT_DIR}/backend/exec_tmp
     depends_on:
       - postgres
     volumes:
-      - ./backend:/app                    # live-reloads code into the container while you dev
+      - ./backend:/app # live-reloads code into the container while you dev
+      - ./backend/exec_tmp:/exec_tmp # shared workspace for submitted code — see note above
+      # Gives this container access to the HOST's Docker daemon so it can spawn
+      # sibling sandbox containers (socket passthrough, NOT Docker-in-Docker).
+      # Without this, docker.from_env() has no daemon to talk to and every
+      # /execute call fails immediately.
+      - /var/run/docker.sock:/var/run/docker.sock
 
   postgres:
     image: postgres:16
@@ -20,9 +30,9 @@ services:
       POSTGRES_PASSWORD: sandbox_pass
       POSTGRES_DB: sandbox_db
     ports:
-      - "5432:5432"                 # lets you connect a DB client from your host too
+      - "5432:5432" # lets you connect a DB client from your host too
     volumes:
-      - pgdata:/var/lib/postgresql/data   # persists data across container restarts
+      - pgdata:/var/lib/postgresql/data # persists data across container restarts
 
 volumes:
   pgdata:
