@@ -6,7 +6,7 @@ Execution service — bare vertical slice.
 
 Run locally:
     pip install -r requirements.txt
-    uvicorn app:app --host 0.0.0.0 --port 8000
+    uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 Requires a Docker daemon reachable at the default socket (or DOCKER_HOST env var),
 and the images in executor.LANGUAGE_IMAGES pulled or pullable.
@@ -22,7 +22,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from services.executor import LANGUAGE_IMAGES, run_code
+# Loaded as app.main by uvicorn, so imports resolve from the project root
+# (backend/), not from inside app/ — hence the `app.` prefix here.
+from app.services.executor import (
+    LANGUAGE_IMAGES,
+    TIMEOUT_SECONDS,
+    MAX_OUTPUT_CHARS,
+    run_code,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("exec-service")
@@ -66,6 +73,18 @@ async def languages():
     return {"languages": sorted(LANGUAGE_IMAGES.keys())}
 
 
+@app.get("/limits")
+async def limits():
+    return {
+        "timeout_seconds": TIMEOUT_SECONDS,
+        "memory_limit": "256m",
+        "max_processes": 64,
+        "max_open_files": 2048,
+        "max_file_size_bytes": 10_000_000,
+        "max_output_chars": MAX_OUTPUT_CHARS,
+    }
+
+
 @app.post("/execute", response_model=ExecuteResponse)
 async def execute(req: ExecuteRequest):
     if req.language not in LANGUAGE_IMAGES:
@@ -80,8 +99,6 @@ async def execute(req: ExecuteRequest):
     client = get_docker_client()
 
     try:
-        # run_code now takes the shared docker client as its first arg, matching
-        # executor.py's signature — this is what was mismatched before.
         result = await loop.run_in_executor(
             _executor_pool,
             functools.partial(run_code, client, req.language, req.code),
