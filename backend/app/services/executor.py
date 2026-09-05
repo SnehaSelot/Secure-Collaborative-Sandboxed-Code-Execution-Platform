@@ -1,7 +1,6 @@
 import tempfile
 import time
 import os
-import shutil
 
 import docker
 from docker.errors import APIError, ContainerError, ImageNotFound
@@ -38,9 +37,24 @@ FILE_EXT = {
 }
 
 TIMEOUT_SECONDS = 10
-
-
 CODE_MOUNT_DIR = "/code"
+
+
+MAX_OUTPUT_CHARS = 20_000
+
+# Most language base images have a world-writable /tmp (mode 1777), so a
+# non-root UID can still write build output there. Verified OK for
+# python/node/gcc/rust images; double-check eclipse-temurin (java) and
+# golang:alpine specifically if you hit permission errors after this change —
+# if one image's /tmp isn't world-writable, drop `user=` for that language
+# only rather than removing it everywhere.
+EXEC_UID = "1000:1000"
+
+
+def _truncate(text: str) -> str:
+    if len(text) <= MAX_OUTPUT_CHARS:
+        return text
+    return text[:MAX_OUTPUT_CHARS] + f"\n...[truncated, {len(text)} chars total]"
 
 
 def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
@@ -72,9 +86,10 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
                 nano_cpus=500_000_000,
                 pids_limit=64,
                 network_disabled=True,
+                user=EXEC_UID,
                 ulimits=[
-                    docker.types.Ulimit(name="nofile", soft=2048, hard=2048),       #type: ignore
-                    docker.types.Ulimit(name="fsize", soft=10_000_000, hard=10_000_000),    #type: ignore
+                    docker.types.Ulimit(name="nofile", soft=2048, hard=2048),  # type: ignore
+                    docker.types.Ulimit(name="fsize", soft=10_000_000, hard=10_000_000),  # type: ignore
                 ],
                 environment=["HOME=/tmp"],
             )
@@ -101,8 +116,8 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
             )
 
             return {
-                "stdout": stdout,
-                "stderr": stderr,
+                "stdout": _truncate(stdout),
+                "stderr": _truncate(stderr),
                 "exit_code": exit_code,
                 "status": status,
                 "execution_time": time.time() - start,
