@@ -1,3 +1,5 @@
+import ntpath
+import posixpath
 import tempfile
 import time
 import os
@@ -51,6 +53,13 @@ EXEC_UID = "1000:1000"
 EXEC_TMP_CONTAINER_DIR = os.environ.get("EXEC_TMP_CONTAINER_DIR", "/exec_tmp")
 
 
+def _host_join(host_path: str, *parts: str) -> str:
+    """Join paths using the host OS's path separator, auto-detected from *host_path*."""
+    if "\\" in host_path or (len(host_path) >= 2 and host_path[1] == ":"):
+        return ntpath.join(host_path, *parts)
+    return posixpath.join(host_path, *parts)
+
+
 @contextmanager
 def _code_workspace():
     """
@@ -74,7 +83,8 @@ def _code_workspace():
         write_dir = os.path.join(EXEC_TMP_CONTAINER_DIR, run_id)
         os.makedirs(write_dir, exist_ok=True)
         try:
-            yield write_dir, f"{host_path.rstrip('/')}/{run_id}"
+            bind_source = _host_join(host_path, run_id)
+            yield write_dir, bind_source
         finally:
             shutil.rmtree(write_dir, ignore_errors=True)
     else:
@@ -123,6 +133,7 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
                     docker.types.Ulimit(name="fsize", soft=10_000_000, hard=10_000_000),  # type: ignore
                 ],
                 environment=["HOME=/tmp"],
+                labels={"sandbox": "exec-service"},
             )
 
             try:
@@ -131,13 +142,8 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
                 status = "success" if exit_code == 0 else "error"
             except Exception:
                 container.kill()
-                return {
-                    "stdout": "",
-                    "stderr": "",
-                    "exit_code": None,
-                    "status": "timeout",
-                    "execution_time": time.time() - start,
-                }
+                exit_code = None
+                status = "timeout"
 
             stdout = container.logs(stdout=True, stderr=False).decode(
                 "utf-8", errors="replace"
@@ -147,8 +153,8 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
             )
 
             return {
-                "stdout": _truncate(stdout),
-                "stderr": _truncate(stderr),
+                "stdout": _truncate(stdout) if status != "timeout" else "",
+                "stderr": _truncate(stderr) if status != "timeout" else "",
                 "exit_code": exit_code,
                 "status": status,
                 "execution_time": time.time() - start,

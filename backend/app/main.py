@@ -1,5 +1,4 @@
 """
-Execution service — bare vertical slice.
 
     POST /execute   { "language": "python", "code": "print(1+1)" }
                      -> { stdout, stderr, exit_code, status, execution_time }
@@ -19,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import docker
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -33,6 +33,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("exec-service")
 
 app = FastAPI(title="Execution Service", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 _executor_pool = ThreadPoolExecutor(max_workers=8)
