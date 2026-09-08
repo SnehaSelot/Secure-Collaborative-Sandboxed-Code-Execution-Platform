@@ -72,6 +72,10 @@ def check(label, condition, detail: object = ""):
 
 
 def run(language, code):
+    r = requests.post(
+        f"{BASE_URL}/execute", json={"language": language, "code": code}, timeout=30
+    )
+    return r
     """POST /execute — uses a long timeout to allow first-time image pulls."""
     try:
         return requests.post(
@@ -115,6 +119,12 @@ for lang, code in HELLO_WORLD.items():
 
 print("\n== error path (non-zero exit) ==")
 r = run(**ERROR_SNIPPET)
+body = r.json()
+check(
+    "runtime exception -> status=error, exit_code != 0",
+    body.get("status") == "error" and body.get("exit_code") not in (0, None),
+    body,
+)
 if r is None:
     check(
         "runtime exception -> status=error, exit_code != 0",
@@ -131,6 +141,8 @@ else:
 
 print("\n== timeout path ==")
 r = run(**TIMEOUT_SNIPPET)
+body = r.json()
+check("infinite loop -> status=timeout", body.get("status") == "timeout", body)
 if r is None:
     check("infinite loop -> status=timeout", False, "request failed/timed out")
 else:
