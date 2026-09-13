@@ -44,7 +44,56 @@ FILE_EXT = {
     "rust": "rs",
 }
 
-TIMEOUT_SECONDS = 10
+PIDS_LIMIT = {
+    "python": 32,
+    "javascript": 32,
+    "c": 32,
+    "cpp": 32,
+    "rust": 64,
+    "java": 64,
+    "go": 128,  # compiler forks more subprocesses
+}
+
+# Per-language fsize ulimit (bytes) — max size of a single file a process may write.
+# Go's compiler writes multi-MB runtime .a object files into $WORK during `go run`;
+# the default 10 MB kills compilation with "file too large".
+_DEFAULT_FSIZE = 10_000_000
+FSIZE_LIMIT = {
+    "go": 256_000_000,  # runtime .a artefacts can be 100+ MB
+    "rust": 64_000_000,  # rustc rlib / incremental artefacts
+    "c": 32_000_000,
+    "cpp": 32_000_000,
+    "java": 32_000_000,
+}
+
+# Per-language execution timeout (seconds).
+# Compiled languages need extra time: Go/Rust compile the full runtime on first run.
+_DEFAULT_TIMEOUT = 15
+TIMEOUT_SECONDS = {
+    "python": 15,
+    "javascript": 15,
+    "java": 30,
+    "c": 20,
+    "cpp": 20,
+    "go": 60,  # cold compile of stdlib takes ~25-30 s in the sandbox
+    "rust": 60,  # rustc is similarly slow on first compile
+}
+
+# Per-language extra environment variables injected into the sandbox container.
+# Go: disable the module proxy and checksum DB — with network_disabled=True the
+# container cannot reach proxy.golang.org or sum.golang.org, so Go hangs for
+# 20-40 s waiting for those TCP connections to time out before falling back to
+# local-only mode.  GOPROXY=off short-circuits that stall immediately.
+EXTRA_ENV: dict[str, list[str]] = {
+    "go": [
+        "GOPROXY=off",  # never try the module proxy
+        "GONOSUMDB=*",  # skip checksum-DB lookups for all modules
+        "GOFLAGS=-buildvcs=false",  # don't try to read git/VCS metadata
+        "GOPATH=/tmp/gopath",  # explicit writable GOPATH inside the container
+        "GOCACHE=/tmp/gocache",  # explicit writable build cache
+    ],
+}
+
 CODE_MOUNT_DIR = "/code"
 
 MAX_OUTPUT_CHARS = 20_000
@@ -128,19 +177,25 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
                 detach=True,
                 mem_limit="256m",
                 nano_cpus=500_000_000,
-                pids_limit=64,
+                pids_limit=PIDS_LIMIT.get(language, 64),
                 network_disabled=True,
                 user=EXEC_UID,
                 ulimits=[
                     docker.types.Ulimit(name="nofile", soft=2048, hard=2048),  # type: ignore
-                    docker.types.Ulimit(name="fsize", soft=10_000_000, hard=10_000_000),  # type: ignore
+                    docker.types.Ulimit(  # type: ignore
+                        name="fsize",
+                        soft=FSIZE_LIMIT.get(language, _DEFAULT_FSIZE),
+                        hard=FSIZE_LIMIT.get(language, _DEFAULT_FSIZE),
+                    ),
                 ],
-                environment=["HOME=/tmp"],
+                environment=["HOME=/tmp"] + EXTRA_ENV.get(language, []),
                 labels={"sandbox": "exec-service"},
             )
 
             try:
-                result = container.wait(timeout=TIMEOUT_SECONDS)
+                result = container.wait(
+                    timeout=TIMEOUT_SECONDS.get(language, _DEFAULT_TIMEOUT)
+                )
                 exit_code = result.get("StatusCode", -1)
                 status = "success" if exit_code == 0 else "error"
             except Exception:
@@ -192,14 +247,20 @@ class ContainerHolder:
 
     The worker writes ``container_id`` immediately after
     ``client.containers.run()`` returns; the async caller reads it once it
-    needs to perform a kill.  A lock is used to make the write/read safe
-    across threads.
+    needs to perform a kill.  ``set_stream`` / ``close_stream`` let the kill
+    path close the Docker attach socket directly, which immediately unblocks
+    the streaming worker thread without waiting for a container-level signal.
+
+    A single lock guards both fields so that a kill racing with stream
+    registration is always safe.
     """
 
     _lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
     _container_id: str | None = field(default=None, init=False)
+    # docker-py CancellableStream (or any object with .close())
+    _attach_stream: object | None = field(default=None, init=False)
 
     def set(self, container_id: str) -> None:
         with self._lock:
@@ -208,6 +269,30 @@ class ContainerHolder:
     def get(self) -> str | None:
         with self._lock:
             return self._container_id
+
+    def set_stream(self, stream: object) -> None:
+        """Register the attach stream so close_stream() can reach it."""
+        with self._lock:
+            self._attach_stream = stream
+
+    def close_stream(self) -> None:
+        """Close the attach stream from the kill path to unblock the worker.
+
+        Closing the underlying socket causes the blocked socket read inside
+        the docker-py generator to raise immediately, breaking the streaming
+        loop without waiting for the container to exit.
+
+        Safe to call before the stream is registered (no-op) or after it
+        has already been closed (also a no-op).
+        """
+        with self._lock:
+            stream = self._attach_stream
+            self._attach_stream = None  # prevent double-close
+        if stream is not None:
+            try:
+                stream.close()  # type: ignore[union-attr]
+            except Exception:
+                pass
 
 
 def stream_run_code(
@@ -264,23 +349,27 @@ def stream_run_code(
         command = RUN_COMMANDS[language](container_path)
 
         try:
-            # Do NOT change any of these without also updating run_code().
-            container = client.containers.run(
+            # Create container without starting it yet.
+            # Attaching before start guarantees that initial output is never lost.
+            container = client.containers.create(
                 LANGUAGE_IMAGES[language],
                 command,
                 volumes={bind_source: {"bind": CODE_MOUNT_DIR, "mode": "ro"}},
                 working_dir=CODE_MOUNT_DIR,
-                detach=True,
                 mem_limit="256m",
                 nano_cpus=500_000_000,
-                pids_limit=64,
+                pids_limit=PIDS_LIMIT.get(language, 64),
                 network_disabled=True,
                 user=EXEC_UID,
                 ulimits=[
                     docker.types.Ulimit(name="nofile", soft=2048, hard=2048),  # type: ignore
-                    docker.types.Ulimit(name="fsize", soft=10_000_000, hard=10_000_000),  # type: ignore
+                    docker.types.Ulimit(  # type: ignore
+                        name="fsize",
+                        soft=FSIZE_LIMIT.get(language, _DEFAULT_FSIZE),
+                        hard=FSIZE_LIMIT.get(language, _DEFAULT_FSIZE),
+                    ),
                 ],
-                environment=["HOME=/tmp"],
+                environment=["HOME=/tmp"] + EXTRA_ENV.get(language, []),
                 labels={"sandbox": "exec-service"},
             )
 
@@ -294,14 +383,6 @@ def stream_run_code(
             container_holder.set(container_id)
 
             # Incremental output streaming via attach() with demux=True.
-            #
-            # client.api.attach() returns a CancellableStream (generator) of
-            # (stdout_bytes|None, stderr_bytes|None) tuples when demux=True and
-            # stream=True.  Iterating it blocks the current thread until the
-            # container exits and the connection is closed by the daemon.
-            #
-            # This is intentional: stream_run_code() runs inside a thread-pool
-            # worker so blocking here is safe.
             stdout_sent = 0  # running char counts for truncation
 
             stderr_sent = 0
@@ -313,9 +394,17 @@ def stream_run_code(
                 stream=True,
                 stdout=True,
                 stderr=True,
-                logs=False,  # don't replay historical output; we start fresh
                 demux=True,
             )
+
+            # Register the stream in the holder so the kill path can call
+            # holder.close_stream() to interrupt the blocking socket read
+            # immediately, without waiting for the container to exit first.
+            container_holder.set_stream(attach_stream)
+
+            # Start container only AFTER attaching, guaranteeing no initial
+            # output is ever missed due to race conditions.
+            container.start()
 
             try:
                 for stdout_chunk, stderr_chunk in attach_stream:
@@ -359,9 +448,17 @@ def stream_run_code(
                                 stderr_sent += len(text)
                         # else: stream truncated — keep draining, discard data
 
+            except Exception:
+                # The attach stream was forcibly closed by the kill path
+                # (container_holder.close_stream()), or a transient network
+                # error occurred.  Stop streaming; the container will be
+                # killed and removed in the outer finally block.
+                pass
             finally:
-                # Always close the attach response so the underlying socket is
-                # released, even if iteration was interrupted.
+                # Deregister from the holder to prevent a second close()
+                # arriving from the kill path after we already cleaned up.
+                # Then release the socket unconditionally.
+                container_holder.close_stream()
                 try:
                     attach_stream.close()
                 except Exception:

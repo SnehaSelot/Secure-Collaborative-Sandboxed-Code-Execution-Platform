@@ -14,9 +14,12 @@ and the images in executor.LANGUAGE_IMAGES pulled or pullable.
 import asyncio
 import functools
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 import docker
+from docker.errors import NotFound, APIError
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -25,6 +28,7 @@ from pydantic import BaseModel, Field
 from app.services.executor import (
     LANGUAGE_IMAGES,
     TIMEOUT_SECONDS,
+    _DEFAULT_TIMEOUT,
     MAX_OUTPUT_CHARS,
     run_code,
     stream_run_code,
@@ -48,7 +52,15 @@ app.add_middleware(
 )
 
 
-_executor_pool = ThreadPoolExecutor(max_workers=8)
+_executor_pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="sandbox-exec")
+
+# Dedicated pool for kill and reap operations.  Using a SEPARATE pool here
+# is the key safety property: cleanup tasks can never be starved by a full
+# _executor_pool.  Without this, a pool saturated with stuck workers would
+# queue _kill() behind the stuck workers — preventing the kill from ever
+# running and creating a self-deadlock.
+_cleanup_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sandbox-cleanup")
+
 _docker_client = None
 
 
@@ -57,6 +69,77 @@ def get_docker_client():
     if _docker_client is None:
         _docker_client = docker.from_env()
     return _docker_client
+
+
+# Background orphan reaper
+# Sweeps every REAP_INTERVAL seconds and force-removes any sandbox container
+# that has been running longer than MAX_CONTAINER_AGE seconds.  This bounds
+# the blast radius of any future stall source (pause, network hiccup, etc.)
+# independent of the _kill() fix above.
+
+_REAP_INTERVAL = 30  # seconds between sweeps
+_MAX_CONTAINER_AGE = 120  # 2× the longest per-language timeout (Go/Rust = 60 s)
+_reaper_task: asyncio.Task | None = None
+
+
+async def _orphan_reaper() -> None:
+    """Periodically force-remove stale sandbox-labelled containers."""
+    while True:
+        await asyncio.sleep(_REAP_INTERVAL)
+        try:
+            client = get_docker_client()
+            loop = asyncio.get_running_loop()
+
+            def _sweep() -> list[str]:
+                now = time.time()
+                reaped: list[str] = []
+                for c in client.containers.list(
+                    all=True, filters={"label": "sandbox=exec-service"}
+                ):
+                    try:
+                        c.reload()
+                        started: str = c.attrs["State"].get("StartedAt", "")
+                        if started and started != "0001-01-01T00:00:00Z":
+                            dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                            age = now - dt.timestamp()
+                            if age > _MAX_CONTAINER_AGE:
+                                c.remove(force=True)
+                                reaped.append(c.short_id)
+                    except Exception:
+                        pass  # container may have been removed concurrently
+                return reaped
+
+            reaped = await loop.run_in_executor(_cleanup_pool, _sweep)
+            if reaped:
+                logger.warning(
+                    "Orphan reaper removed %d stale container(s): %s",
+                    len(reaped),
+                    reaped,
+                )
+        except Exception:
+            logger.exception("Orphan reaper sweep failed unexpectedly")
+
+
+@app.on_event("startup")
+async def _start_reaper() -> None:
+    global _reaper_task
+    _reaper_task = asyncio.create_task(_orphan_reaper())
+    logger.info(
+        "Orphan reaper started (interval=%ds, max_age=%ds)",
+        _REAP_INTERVAL,
+        _MAX_CONTAINER_AGE,
+    )
+
+
+@app.on_event("shutdown")
+async def _stop_reaper() -> None:
+    if _reaper_task is not None:
+        _reaper_task.cancel()
+        try:
+            await _reaper_task
+        except asyncio.CancelledError:
+            pass
+    logger.info("Orphan reaper stopped")
 
 
 class ExecuteRequest(BaseModel):
@@ -74,7 +157,24 @@ class ExecuteResponse(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    # ThreadPoolExecutor internals used here are stable across CPython 3.9-3.13.
+    # _threads  : set of all worker Thread objects ever started (started lazily)
+    # _work_queue.qsize() : tasks waiting for a free thread (> 0 ⟹ saturated)
+    exec_threads = len(_executor_pool._threads)
+    exec_queued = _executor_pool._work_queue.qsize()
+    cleanup_threads = len(_cleanup_pool._threads)
+    cleanup_queued = _cleanup_pool._work_queue.qsize()
+    return {
+        "status": "ok",
+        # execution pool
+        "exec_pool_max": _executor_pool._max_workers,
+        "exec_pool_threads": exec_threads,  # threads started (some may be idle)
+        "exec_pool_queued": exec_queued,  # tasks waiting; > 0 means saturated
+        # cleanup pool (kill + reap)
+        "cleanup_pool_max": _cleanup_pool._max_workers,
+        "cleanup_pool_threads": cleanup_threads,
+        "cleanup_pool_queued": cleanup_queued,
+    }
 
 
 @app.get("/languages")
@@ -269,7 +369,9 @@ async def ws_execute(websocket: WebSocket):
     # --- 7. Race worker vs timeout ------------------------------------------
     timeout_requested = False
 
-    timeout_task = asyncio.ensure_future(asyncio.sleep(TIMEOUT_SECONDS))
+    timeout_task = asyncio.ensure_future(
+        asyncio.sleep(TIMEOUT_SECONDS.get(language, _DEFAULT_TIMEOUT))
+    )
     done, _ = await asyncio.wait(
         {worker_future, timeout_task},
         return_when=asyncio.FIRST_COMPLETED,
@@ -284,17 +386,72 @@ async def ws_execute(websocket: WebSocket):
                 # Run the blocking kill() in the thread pool so we don't block
                 # the event loop.
                 def _kill():
+                    # Step 1 — close the attach stream to immediately unblock
+                    # the streaming worker thread.  The blocking socket read
+                    # inside the docker-py generator will raise and the worker
+                    # will exit the stream loop, freeing the thread before the
+                    # Docker kill signal has even been sent.
+                    holder.close_stream()
+
+                    # Step 2 — kill the container so it stops and Docker
+                    # closes the connection on the daemon side too.
                     try:
-                        client.containers.get(container_id).kill()
-                    except Exception as kill_exc:
-                        # Container already exited — benign race; log and ignore.
+                        c = client.containers.get(container_id)
+                        c.reload()
+                        if c.status == "paused":
+                            # Docker refuses to kill a paused container — the
+                            # cgroup is frozen so the signal has nowhere to land.
+                            # Unpause first, then kill.  This is the most common
+                            # cause of orphaned containers on Docker Desktop
+                            # (Windows/macOS Resource Saver auto-pauses idle
+                            # containers).
+                            logger.warning(
+                                "Container %s is paused — unpausing before kill",
+                                container_id,
+                            )
+                            c.unpause()
+                        c.kill()
+                    except NotFound:
+                        # 404 → container exited naturally just before we got
+                        # here; this is a benign race.
                         logger.debug(
-                            "kill() raced with natural exit for container %s: %s",
+                            "Container %s already gone (natural exit race)",
+                            container_id,
+                        )
+                    except APIError as api_err:
+                        if (
+                            getattr(api_err, "status_code", None) == 409
+                            or (
+                                api_err.response is not None
+                                and api_err.response.status_code == 409
+                            )
+                            or "is not running" in str(api_err).lower()
+                        ):
+                            logger.debug(
+                                "Container %s already stopped (natural exit race): %s",
+                                container_id,
+                                api_err,
+                            )
+                        else:
+                            logger.warning(
+                                "kill() failed unexpectedly for container %s: %s",
+                                container_id,
+                                api_err,
+                            )
+                    except Exception as kill_exc:
+                        # Anything else is a real failure — log loudly so it isn't silently dropped.
+                        logger.warning(
+                            "kill() failed unexpectedly for container %s: %s",
                             container_id,
                             kill_exc,
                         )
 
-                await loop.run_in_executor(_executor_pool, _kill)
+                # Use _cleanup_pool, NOT _executor_pool.  This is the
+                # critical safety property: _kill() must always have a free
+                # thread even if _executor_pool is fully saturated with stuck
+                # workers.  Submitting to _executor_pool would queue _kill()
+                # behind the stuck workers → kill never runs → self-deadlock.
+                await loop.run_in_executor(_cleanup_pool, _kill)
             except Exception:
                 logger.exception("Unexpected error killing container %s", container_id)
     else:

@@ -37,11 +37,32 @@ import websockets
 
 BASE_HTTP = "http://localhost:8000"
 BASE_WS = "ws://localhost:8000/ws/execute"
-TIMEOUT_SECONDS = 10  # executor.TIMEOUT_SECONDS
+# Per-language execution timeouts — must mirror executor.TIMEOUT_SECONDS exactly.
+TIMEOUT_SECONDS: dict[str, int] = {
+    "python": 15,
+    "javascript": 15,
+    "java": 30,
+    "c": 20,
+    "cpp": 20,
+    "go": 60,  # cold compile of stdlib takes ~25-30 s in the sandbox
+    "rust": 60,  # rustc is similarly slow on first compile
+}
+_DEFAULT_TIMEOUT = 15  # fallback for languages not in the dict above
+# Convenience alias used by tests that only run Python code.
+_PYTHON_TIMEOUT = TIMEOUT_SECONDS["python"]
 MAX_OUTPUT_CHARS = 20_000  # executor.MAX_OUTPUT_CHARS
 EXEC_UID = "1000"  # numeric part of executor.EXEC_UID ("1000:1000")
 HTTP_TIMEOUT = 60  # generous HTTP timeout for first-run image pulls
-WS_RECV_TIMEOUT = TIMEOUT_SECONDS + 15  # outer guard on ws.recv()
+# Safety margin added on top of the executor timeout for the ws.recv() guard.
+_WS_RECV_MARGIN = 20
+# Default ws.recv() timeout guard (used for Python and standalone ws tests)
+WS_RECV_TIMEOUT = _PYTHON_TIMEOUT + _WS_RECV_MARGIN
+
+
+def get_ws_recv_timeout(language: str = "python") -> int:
+    return TIMEOUT_SECONDS.get(language, _DEFAULT_TIMEOUT) + _WS_RECV_MARGIN
+
+
 DOCKER_LABEL = "sandbox=exec-service"
 
 # ---------------------------------------------------------------------------
@@ -131,6 +152,11 @@ async def ws_execute_async(
 
     Returns (messages, total_elapsed_seconds).
     """
+    # Derive a per-language recv timeout: executor's own timeout + a safety
+    # margin.  This prevents the test from timing out before the executor does
+    # for slow-to-compile languages (Go, Rust).
+    ws_recv_timeout = get_ws_recv_timeout(language)
+
     messages: list[dict] = []
     t0 = time.monotonic()
 
@@ -145,10 +171,10 @@ async def ws_execute_async(
                 break  # intentional early disconnect
 
             try:
-                raw = await asyncio.wait_for(ws.recv(), timeout=WS_RECV_TIMEOUT)
+                raw = await asyncio.wait_for(ws.recv(), timeout=ws_recv_timeout)
             except asyncio.TimeoutError:
                 raise TimeoutError(
-                    f"ws_execute: no result/error within {WS_RECV_TIMEOUT}s"
+                    f"ws_execute: no result/error within {ws_recv_timeout}s"
                 )
 
             msg = json.loads(raw)
@@ -185,6 +211,30 @@ def assert_no_orphan_containers():
     assert surviving == [], "Orphaned sandbox containers: " + ", ".join(
         f"{c.short_id}({c.status})" for c in surviving
     )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def purge_stale_containers():
+    """Remove any leftover sandbox containers from a previous (interrupted) test
+    run before the session starts, and again at the very end.
+
+    This prevents containers orphaned by a prior run from causing false
+    positives in assert_no_orphan_containers() calls throughout the session.
+    It does NOT mask real bugs: per-test orphan checks still run after each
+    test and catch containers leaked by *this* run.
+    """
+
+    def _purge():
+        client = docker.from_env()
+        for c in client.containers.list(all=True, filters={"label": DOCKER_LABEL}):
+            try:
+                c.remove(force=True)
+            except Exception:
+                pass
+
+    _purge()  # before suite
+    yield
+    _purge()  # after suite
 
 
 # ---------------------------------------------------------------------------
@@ -329,8 +379,8 @@ class TestTimeout:
         r = result_of(msgs)
         assert r["status"] == "timeout"  # type: ignore
         assert (
-            elapsed < TIMEOUT_SECONDS + 5
-        ), f"Took {elapsed:.1f}s (expected <{TIMEOUT_SECONDS+5})"
+            elapsed < _PYTHON_TIMEOUT + 5
+        ), f"Took {elapsed:.1f}s (expected <{_PYTHON_TIMEOUT+5})"
         assert_no_orphan_containers()
 
     def test_11_sleep_beyond_timeout_output_check(self):
@@ -351,13 +401,13 @@ class TestTimeout:
         msgs, _ = ws_execute("python", "while True:\n    x = 1234567 * 7654321\n")
         elapsed = time.monotonic() - start
         assert result_of(msgs)["status"] == "timeout"  # type: ignore
-        assert elapsed < TIMEOUT_SECONDS + 5
+        assert elapsed < _PYTHON_TIMEOUT + 5
         assert_no_orphan_containers()
 
     @pytest.mark.parametrize("delta", [-1, 0, 1])
     def test_13_timeout_boundary(self, delta):
         """TEST-13: Boundary behaviour: sleep(TIMEOUT +/- delta)."""
-        sleep = max(0, TIMEOUT_SECONDS + delta)
+        sleep = max(0, _PYTHON_TIMEOUT + delta)
         msgs, _ = ws_execute(
             "python", f"import time\ntime.sleep({sleep})\nprint('done')\n"
         )
@@ -517,7 +567,7 @@ class TestCPULimits:
         msgs, _ = ws_execute("python", "while True:\n    pass\n")
         elapsed = time.monotonic() - start
         assert result_of(msgs)["status"] == "timeout"  # type: ignore
-        assert elapsed < TIMEOUT_SECONDS * 2, f"Took {elapsed:.1f}s"
+        assert elapsed < _PYTHON_TIMEOUT * 2, f"Took {elapsed:.1f}s"
         assert_no_orphan_containers()
 
     def test_25_multiple_cpu_hungry_containers(self):
@@ -659,7 +709,7 @@ class TestWebSocketDisconnect:
 
         _run(run())
         # Wait for container timeout + cleanup
-        time.sleep(TIMEOUT_SECONDS + 2)
+        time.sleep(_PYTHON_TIMEOUT + 2)
         assert_no_orphan_containers()
 
     def test_32_disconnect_during_output_flood(self):
@@ -683,7 +733,7 @@ class TestWebSocketDisconnect:
                 # disconnect
 
         _run(run())
-        time.sleep(TIMEOUT_SECONDS + 2)
+        time.sleep(_PYTHON_TIMEOUT + 2)
         assert_no_orphan_containers()
 
     def test_33_disconnect_near_timeout(self):
@@ -699,7 +749,7 @@ class TestWebSocketDisconnect:
                         }
                     )
                 )
-                await asyncio.sleep(TIMEOUT_SECONDS - 0.5)
+                await asyncio.sleep(_PYTHON_TIMEOUT - 0.5)
                 # intentional disconnect just before the timeout fires
 
         _run(run())
@@ -762,6 +812,10 @@ class TestConcurrentExecution:
             assert f"session_{i}" in stdout_of(
                 msgs
             ), f"Session {i} is missing its output"
+        # Brief pause: 10 concurrent container.remove() calls race inside the
+        # ThreadPoolExecutor; wait for all Docker removes to complete before
+        # checking for orphans.
+        time.sleep(1)
         assert_no_orphan_containers()
 
     def test_36_one_timeout_does_not_affect_other(self):
@@ -772,12 +826,38 @@ class TestConcurrentExecution:
                 ws_execute_async("python", "while True:\n    pass\n")
             )
             b = asyncio.create_task(ws_execute_async("python", "print('B done')\n"))
-            return await asyncio.gather(a, b)
+            # return_exceptions=True captures any ws_execute_async TimeoutError
+            # as a value instead of letting it abort the gather early.
+            return await asyncio.gather(a, b, return_exceptions=True)
 
-        (msgs_a, _), (msgs_b, _) = _run(run())
-        assert result_of(msgs_a)["status"] == "timeout"  # type: ignore
-        assert result_of(msgs_b)["status"] == "success"  # type: ignore
+        results = _run(run())
+        assert not isinstance(
+            results[0], Exception
+        ), f"Session A raised unexpectedly: {results[0]}"
+        assert not isinstance(
+            results[1], Exception
+        ), f"Session B raised unexpectedly: {results[1]}"
+        (msgs_a, _), (msgs_b, _) = results
+
+        r_a = result_of(msgs_a)
+        assert r_a is not None, (
+            f"Session A: no 'result' message received — "
+            f"server never sent final status. msgs={msgs_a}"
+        )
+        assert (
+            r_a["status"] == "timeout"
+        ), f"Session A: expected 'timeout', got {r_a['status']!r}"
+
+        r_b = result_of(msgs_b)
+        assert (
+            r_b is not None
+        ), f"Session B: no 'result' message received. msgs={msgs_b}"
+        assert (
+            r_b["status"] == "success"
+        ), f"Session B: expected 'success', got {r_b['status']!r}"
         assert "B done" in stdout_of(msgs_b)
+
+        time.sleep(2)  # allow server-side container.remove() calls to settle
         assert_no_orphan_containers()
 
 
@@ -1105,7 +1185,7 @@ class TestRaceConditions:
 
     def test_56_natural_completion_vs_timeout_boundary(self):
         """TEST-56: Near-timeout runs (x5) produce consistent, valid states."""
-        code = f"import time\ntime.sleep({TIMEOUT_SECONDS - 0.5})\nprint('done')\n"
+        code = f"import time\ntime.sleep({_PYTHON_TIMEOUT - 0.5})\nprint('done')\n"
         for attempt in range(5):
             msgs, _ = ws_execute("python", code)
             r = result_of(msgs)
@@ -1117,16 +1197,16 @@ class TestRaceConditions:
             assert_no_orphan_containers()
 
     def test_57_timeout_vs_cleanup_no_orphan(self):
-        """TEST-57: sleep(TIMEOUT_SECONDS) repeated 5x -- no orphan containers."""
+        """TEST-57: sleep(_PYTHON_TIMEOUT) repeated 5x -- no orphan containers."""
         for _ in range(5):
-            ws_execute("python", f"import time\ntime.sleep({TIMEOUT_SECONDS})\n")
+            ws_execute("python", f"import time\ntime.sleep({_PYTHON_TIMEOUT})\n")
             time.sleep(0.5)
             assert_no_orphan_containers()
 
     def test_58_disconnect_at_multiple_moments(self):
         """TEST-58: Disconnect at 0.1 s, 0.5 s, and TIMEOUT-0.5 s -- no leaks."""
         code = "import time\nfor i in range(100):\n    print(i)\n    time.sleep(0.3)\n"
-        for delay in [0.1, 0.5, TIMEOUT_SECONDS - 0.5]:
+        for delay in [0.1, 0.5, _PYTHON_TIMEOUT - 0.5]:
 
             async def run(d=delay):
                 async with websockets.connect(BASE_WS, open_timeout=10) as ws:
@@ -1135,7 +1215,7 @@ class TestRaceConditions:
                     # intentional disconnect
 
             _run(run())
-            time.sleep(TIMEOUT_SECONDS + 2)  # wait for container cleanup
+            time.sleep(_PYTHON_TIMEOUT + 2)  # wait for container cleanup
             assert_no_orphan_containers()
 
 
@@ -1152,7 +1232,7 @@ class TestStressAbuse:
         msgs, elapsed = ws_execute("python", "while True:\n    print('A' * 32)\n")
         assert result_of(msgs)["status"] == "timeout"  # type: ignore
         assert len(stdout_of(msgs)) <= MAX_OUTPUT_CHARS + 100
-        assert elapsed < TIMEOUT_SECONDS + 5
+        assert elapsed < _PYTHON_TIMEOUT + 5
         assert_no_orphan_containers()
 
     def test_60_memory_allocation_plus_output(self):
@@ -1183,7 +1263,7 @@ class TestStressAbuse:
             "time.sleep(60)\n",
         )
         assert result_of(msgs)["status"] == "timeout"  # type: ignore
-        assert elapsed < TIMEOUT_SECONDS + 5
+        assert elapsed < _PYTHON_TIMEOUT + 5
         assert_no_orphan_containers()
 
     def test_62_everything_combined(self):
@@ -1215,7 +1295,7 @@ class TestStressAbuse:
         )
         r = result_of(msgs)
         assert r["status"] in ("timeout", "error")  # type: ignore
-        assert elapsed < TIMEOUT_SECONDS + 10
+        assert elapsed < _PYTHON_TIMEOUT + 10
         assert len(stdout_of(msgs)) <= MAX_OUTPUT_CHARS + 100
         assert_no_orphan_containers()
 
