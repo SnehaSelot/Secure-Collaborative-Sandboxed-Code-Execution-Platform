@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 
 type Badge = 'Coming Soon' | 'Preview' | 'Backend Required';
@@ -63,6 +64,14 @@ const ICONS = {
       strokeLinejoin="round"
     />
   ),
+  collapse: (
+    <path
+      d="M15 5v14M9 5v14M4 5h16v14H4z"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinejoin="round"
+    />
+  ),
 } as const;
 
 const NAV_ITEMS: NavItem[] = [
@@ -85,15 +94,28 @@ const BADGE_STYLES: Record<Badge, string> = {
 };
 
 export function Sidebar() {
+  // Local component state per project convention (executionStore's own
+  // comments: shared execution state lives in the store, UI-only state
+  // that nothing else needs stays as useState here). Nothing else reads
+  // whether the sidebar is collapsed, so it isn't a Zustand store.
+  const [collapsed, setCollapsed] = useState(false);
+
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-white/10 bg-neutral-950/60 max-md:hidden">
+    <aside
+      className={`flex shrink-0 flex-col border-r border-white/10 bg-neutral-950/60 transition-[width] duration-200 max-md:hidden ${
+        collapsed ? 'w-16' : 'w-60'
+      }`}
+    >
       <nav className="flex-1 space-y-1 p-3">
         {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
+            title={collapsed ? item.label : undefined}
             className={({ isActive }) =>
               `flex items-center gap-3 rounded-md px-3 py-2 text-sm transition ${
+                collapsed ? 'justify-center' : ''
+              } ${
                 isActive
                   ? 'bg-emerald-500/10 text-emerald-400'
                   : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-100'
@@ -110,13 +132,17 @@ export function Sidebar() {
             >
               {item.icon}
             </svg>
-            <span className="flex-1 truncate">{item.label}</span>
-            {item.badge && (
-              <span
-                className={`rounded-full border px-1.5 py-0.5 text-[10px] leading-none whitespace-nowrap ${BADGE_STYLES[item.badge]}`}
-              >
-                {item.badge}
-              </span>
+            {!collapsed && (
+              <>
+                <span className="flex-1 truncate">{item.label}</span>
+                {item.badge && (
+                  <span
+                    className={`rounded-full border px-1.5 py-0.5 text-[10px] leading-none whitespace-nowrap ${BADGE_STYLES[item.badge]}`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </>
             )}
           </NavLink>
         ))}
@@ -125,16 +151,45 @@ export function Sidebar() {
       <div className="border-t border-white/10 p-3">
         <button
           type="button"
-          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-neutral-500 transition hover:bg-white/5 hover:text-neutral-300"
-          title="Settings — coming soon, no persistence backend yet"
+          title={collapsed ? 'Settings — coming soon' : 'Settings — coming soon, no persistence backend yet'}
+          className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-neutral-500 transition hover:bg-white/5 hover:text-neutral-300 ${
+            collapsed ? 'justify-center' : ''
+          }`}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
             {ICONS.settings}
           </svg>
-          <span className="flex-1 text-left">Settings</span>
-          <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] leading-none text-neutral-400">
-            Coming Soon
-          </span>
+          {!collapsed && (
+            <>
+              <span className="flex-1 text-left">Settings</span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] leading-none text-neutral-400">
+                Coming Soon
+              </span>
+            </>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
+          className={`mt-1 flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-neutral-500 transition hover:bg-white/5 hover:text-neutral-300 ${
+            collapsed ? 'justify-center' : ''
+          }`}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+            className={`shrink-0 transition-transform ${collapsed ? 'rotate-180' : ''}`}
+          >
+            {ICONS.collapse}
+          </svg>
+          {!collapsed && <span className="flex-1 text-left">Collapse</span>}
         </button>
       </div>
     </aside>
