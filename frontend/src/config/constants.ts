@@ -24,8 +24,6 @@ export const FALLBACK_LANGUAGES = [
 
 export const DEFAULT_LANGUAGE = 'python';
 
-export const DEFAULT_CODE = 'print("Hello from GlassHouse!")';
-
 /**
  * Docker image pulls on a language's first run can take minutes
  * (see test_execution_service.py's own comment on this). This timeout

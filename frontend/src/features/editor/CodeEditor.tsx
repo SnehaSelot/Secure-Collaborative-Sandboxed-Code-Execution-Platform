@@ -31,6 +31,11 @@ export function CodeEditor({ language, value, onChange }: CodeEditorProps) {
           scrollBeyondLastLine: false,
           padding: { top: 12 },
           fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, monospace",
+          // Explicit, not just relying on the default: without these,
+          // a stale Monaco model from a previous mount can occasionally
+          // come back read-only after a fast file/language switch.
+          readOnly: false,
+          domReadOnly: false,
         }}
       />
     </div>

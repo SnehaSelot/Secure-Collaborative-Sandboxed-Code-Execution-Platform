@@ -3,6 +3,7 @@ import { useLanguages } from '../../hooks/useLanguages';
 interface LanguageSelectorProps {
   value: string;
   onChange: (language: string) => void;
+  disabled?: boolean;
 }
 
 /**
@@ -12,8 +13,15 @@ interface LanguageSelectorProps {
  * Falls back to a local list only if the backend request fails —
  * see FALLBACK_LANGUAGES in config/constants.ts.
  */
-export function LanguageSelector({ value, onChange }: LanguageSelectorProps) {
+export function LanguageSelector({ value, onChange, disabled }: LanguageSelectorProps) {
   const { languages, loading, isFallback } = useLanguages();
+
+  // A file's language can be something the backend can't execute at all
+  // (e.g. "markdown" for a README.md, detected by the File Explorer).
+  // Keep the <select> controlled correctly by making sure `value`
+  // always has a matching <option>, even if it's not one of the 7
+  // backend-executable languages.
+  const options = languages.includes(value) ? languages : [value, ...languages];
 
   return (
     <div className="flex items-center gap-2">
@@ -24,10 +32,10 @@ export function LanguageSelector({ value, onChange }: LanguageSelectorProps) {
         id="language-select"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        disabled={loading}
+        disabled={loading || disabled}
         className="rounded-md border border-white/10 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500 disabled:opacity-50"
       >
-        {languages.map((lang) => (
+        {options.map((lang) => (
           <option key={lang} value={lang}>
             {lang}
           </option>

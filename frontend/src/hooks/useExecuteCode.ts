@@ -7,7 +7,7 @@ import { useExecutionStore } from '../state/executionStore';
  * BACKEND INTEGRATION:
  * Endpoint: POST /execute
  * Status: Available
- * Request: { language: string, code: string }
+ * Request: { language: string, code: string, stdin?: string }
  * Response: { stdout, stderr, exit_code, status, execution_time }
  * TODO: Keep this function isolated so the endpoint can be changed later.
  *
@@ -22,7 +22,11 @@ export function useExecuteCode() {
   const isRunning = useExecutionStore((s) => s.isRunning);
 
   const run = useCallback(
-    async (code: string, language: string) => {
+    // stdin is optional and, when blank, simply omitted from the request —
+    // this keeps the request byte-for-byte identical to before for any
+    // program that isn't using it, matching the backend's own no-stdin
+    // fast path.
+    async (code: string, language: string, stdin?: string) => {
       if (!code.trim()) {
         setError('Code cannot be empty.');
         return;
@@ -31,7 +35,12 @@ export function useExecuteCode() {
       startExecution(code, language);
 
       try {
-        const result = await executeCode({ code, language });
+        const trimmedStdin = stdin?.trim();
+        const result = await executeCode({
+          code,
+          language,
+          ...(trimmedStdin ? { stdin: trimmedStdin } : {}),
+        });
         setResult(result);
       } catch (err) {
         setError(extractErrorMessage(err));

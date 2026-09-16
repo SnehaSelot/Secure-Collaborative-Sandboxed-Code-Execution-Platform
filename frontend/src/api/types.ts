@@ -28,6 +28,8 @@ export interface LimitsResponse {
 export interface ExecuteRequest {
   language: string;
   code: string;
+  /** Optional — only sent when non-empty. Piped to the program's stdin. */
+  stdin?: string;
 }
 
 export type ExecutionStatus = 'success' | 'error' | 'timeout' | 'internal_error';
