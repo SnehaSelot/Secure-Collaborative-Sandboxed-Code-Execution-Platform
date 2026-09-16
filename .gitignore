@@ -10,3 +10,4 @@ __pycache__/
 
 # Temporary execution files
 backend/exec_tmp/
+backend/learning/

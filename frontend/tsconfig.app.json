@@ -26,8 +26,9 @@
     /*Configuring the alias*/
     "baseUrl": ".",
     "paths": {
-    "@/*": ["./src/*"]
-}
+      "@/*": ["./src/*"]
+    },
+    "ignoreDeprecations": "6.0"
   },
   "include": ["src"]
 }
