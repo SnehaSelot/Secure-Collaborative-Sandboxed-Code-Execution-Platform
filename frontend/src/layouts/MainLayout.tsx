@@ -1,6 +1,8 @@
 import { Outlet } from 'react-router-dom';
 import { Header } from '../components/layout/Header';
 import { Sidebar } from '../components/layout/Sidebar';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { ToastContainer } from '../components/ui/Toast';
 
 export function MainLayout() {
   return (
@@ -12,6 +14,8 @@ export function MainLayout() {
           <Outlet />
         </main>
       </div>
+      <ConfirmDialog />
+      <ToastContainer />
     </div>
   );
 }

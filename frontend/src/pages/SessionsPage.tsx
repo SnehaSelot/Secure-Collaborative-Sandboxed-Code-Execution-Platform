@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useSessionsStore } from '../state/sessionsStore';
 import { useWorkspaceStore } from '../state/workspaceStore';
+import { useConfirmDialogStore } from '../state/confirmDialogStore';
+import { useToastStore } from '../state/toastStore';
 
 function formatTimestamp(ms: number): string {
   return new Date(ms).toLocaleString();
@@ -11,6 +13,9 @@ function formatTimestamp(ms: number): string {
  * sharing/joining — that needs a backend workspace service (see
  * state/sessionsStore.ts's header comment). Labeled clearly so this
  * doesn't read as more than it is, same pattern as RiskAnalysisPage.
+ *
+ * Restore/Delete confirmations use the shared ConfirmDialog (no
+ * window.confirm), and every successful action pushes a toast.
  */
 export function SessionsPage() {
   const sessions = useSessionsStore((s) => s.sessions);
@@ -20,25 +25,42 @@ export function SessionsPage() {
 
   const fileCount = useWorkspaceStore((s) => Object.keys(s.nodes).length);
 
+  const openConfirmDialog = useConfirmDialogStore((s) => s.open);
+  const addToast = useToastStore((s) => s.addToast);
+
   const [name, setName] = useState('');
 
   const handleSave = () => {
     const trimmed = name.trim() || `Session ${new Date().toLocaleString()}`;
     saveSession(trimmed);
+    addToast('success', `Session "${trimmed}" saved.`);
     setName('');
   };
 
   const handleRestore = (id: string, sessionName: string) => {
-    const confirmed = window.confirm(
-      `Restore "${sessionName}"? This replaces your current workspace (${fileCount} file${fileCount === 1 ? '' : 's'}) — save it first if you want to keep it.`,
-    );
-    if (confirmed) restoreSession(id);
+    openConfirmDialog({
+      title: 'Restore session',
+      message: `Restore "${sessionName}"? This replaces your current workspace (${fileCount} file${fileCount === 1 ? '' : 's'}) — save it first if you want to keep it.`,
+      confirmLabel: 'Restore',
+      destructive: true,
+      onConfirm: () => {
+        restoreSession(id);
+        addToast('success', `Restored session "${sessionName}".`);
+      },
+    });
   };
 
   const handleDelete = (id: string, sessionName: string) => {
-    if (window.confirm(`Delete "${sessionName}"? This can't be undone.`)) {
-      deleteSession(id);
-    }
+    openConfirmDialog({
+      title: 'Delete session',
+      message: `Delete "${sessionName}"? This can't be undone.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+      onConfirm: () => {
+        deleteSession(id);
+        addToast('success', `Deleted session "${sessionName}".`);
+      },
+    });
   };
 
   return (

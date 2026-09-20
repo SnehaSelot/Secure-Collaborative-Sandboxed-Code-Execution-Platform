@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWorkspaceStore } from '../../state/workspaceStore';
 import type { FileSystemNode } from '../../state/workspaceStore';
 import { useCreateItemModalStore } from '../../state/createItemModalStore';
+import { useConfirmDialogStore } from '../../state/confirmDialogStore';
+import { useToastStore } from '../../state/toastStore';
 import { FileTree } from './FileTree';
 
 interface FileTreeItemProps {
@@ -69,14 +71,30 @@ export function FileTreeItem({ node, depth }: FileTreeItemProps) {
   const toggleFolder = useWorkspaceStore((s) => s.toggleFolder);
   const renameNode = useWorkspaceStore((s) => s.renameNode);
   const deleteNode = useWorkspaceStore((s) => s.deleteNode);
+  const nodes = useWorkspaceStore((s) => s.nodes);
   const openCreateModal = useCreateItemModalStore((s) => s.open);
+  const openConfirmDialog = useConfirmDialogStore((s) => s.open);
+  const addToast = useToastStore((s) => s.addToast);
 
   const [isHovered, setIsHovered] = useState(false);
+
+  // Inline VS Code-style rename — replaces window.prompt().
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [draftName, setDraftName] = useState(node.name);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isRenaming) {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }
+  }, [isRenaming]);
 
   const isActive = node.type === 'file' && node.id === activeFileId;
   const isFolder = node.type === 'folder';
 
   function handlePrimaryClick() {
+    if (isRenaming) return;
     if (isFolder) {
       toggleFolder(node.id);
     } else {
@@ -84,20 +102,57 @@ export function FileTreeItem({ node, depth }: FileTreeItemProps) {
     }
   }
 
-  function handleRename(e: React.MouseEvent) {
+  function handleRenameClick(e: React.MouseEvent) {
     e.stopPropagation();
-    const next = window.prompt(`Rename "${node.name}" to:`, node.name);
-    if (next && next.trim() && next.trim() !== node.name) {
-      renameNode(node.id, next.trim());
+    setDraftName(node.name);
+    setIsRenaming(true);
+  }
+
+  function commitRename() {
+    const trimmed = draftName.trim();
+    if (trimmed && trimmed !== node.name) {
+      renameNode(node.id, trimmed);
+      addToast('success', `Renamed "${node.name}" to "${trimmed}".`);
+    }
+    setIsRenaming(false);
+  }
+
+  function cancelRename() {
+    setDraftName(node.name);
+    setIsRenaming(false);
+  }
+
+  function handleRenameKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      commitRename();
+    } else if (e.key === 'Escape') {
+      cancelRename();
     }
   }
 
   function handleDelete(e: React.MouseEvent) {
     e.stopPropagation();
     const what = isFolder ? 'folder and everything inside it' : 'file';
-    if (window.confirm(`Delete ${what} "${node.name}"? This cannot be undone.`)) {
-      deleteNode(node.id);
-    }
+    // How many descendants a folder delete would take with it, for a
+    // more informative confirm message than "This cannot be undone."
+    const descendantCount = isFolder
+      ? Object.values(nodes).filter((n) => n.parentId === node.id).length
+      : 0;
+
+    openConfirmDialog({
+      title: `Delete ${isFolder ? 'folder' : 'file'}`,
+      message:
+        isFolder && descendantCount > 0
+          ? `Delete "${node.name}" and its ${descendantCount} item${descendantCount === 1 ? '' : 's'}? This cannot be undone.`
+          : `Delete ${what} "${node.name}"? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+      onConfirm: () => {
+        deleteNode(node.id);
+        addToast('success', `Deleted ${isFolder ? 'folder' : 'file'} "${node.name}".`);
+      },
+    });
   }
 
   function handleNewFile(e: React.MouseEvent) {
@@ -145,62 +200,78 @@ export function FileTreeItem({ node, depth }: FileTreeItemProps) {
           {isFolder ? FOLDER_ICON : FILE_ICON}
         </svg>
 
-        <span className="flex-1 truncate">{node.name}</span>
-
-        <span
-          className={`flex shrink-0 items-center gap-0.5 transition-opacity ${
-            isHovered ? 'opacity-100' : 'opacity-0'
-          }`}
-        >
-          {isFolder && (
-            <>
-              <button
-                type="button"
-                onClick={handleNewFile}
-                title="New file here"
-                aria-label={`New file inside ${node.name}`}
-                className="rounded p-1 text-neutral-500 hover:bg-white/10 hover:text-neutral-200"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  {PLUS_FILE_ICON}
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={handleNewFolder}
-                title="New folder here"
-                aria-label={`New folder inside ${node.name}`}
-                className="rounded p-1 text-neutral-500 hover:bg-white/10 hover:text-neutral-200"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  {PLUS_FOLDER_ICON}
-                </svg>
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={handleRename}
-            title="Rename"
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            type="text"
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={handleRenameKeyDown}
+            onBlur={commitRename}
             aria-label={`Rename ${node.name}`}
-            className="rounded p-1 text-neutral-500 hover:bg-white/10 hover:text-neutral-200"
+            className="min-w-0 flex-1 rounded border border-emerald-500/50 bg-neutral-950 px-1 py-0.5 text-sm text-neutral-100 outline-none"
+          />
+        ) : (
+          <span className="flex-1 truncate">{node.name}</span>
+        )}
+
+        {!isRenaming && (
+          <span
+            className={`flex shrink-0 items-center gap-0.5 transition-opacity ${
+              isHovered ? 'opacity-100' : 'opacity-0'
+            }`}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              {PENCIL_ICON}
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            title="Delete"
-            aria-label={`Delete ${node.name}`}
-            className="rounded p-1 text-neutral-500 hover:bg-red-500/10 hover:text-red-400"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              {TRASH_ICON}
-            </svg>
-          </button>
-        </span>
+            {isFolder && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleNewFile}
+                  title="New file here"
+                  aria-label={`New file inside ${node.name}`}
+                  className="rounded p-1 text-neutral-500 hover:bg-white/10 hover:text-neutral-200"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    {PLUS_FILE_ICON}
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNewFolder}
+                  title="New folder here"
+                  aria-label={`New folder inside ${node.name}`}
+                  className="rounded p-1 text-neutral-500 hover:bg-white/10 hover:text-neutral-200"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    {PLUS_FOLDER_ICON}
+                  </svg>
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={handleRenameClick}
+              title="Rename"
+              aria-label={`Rename ${node.name}`}
+              className="rounded p-1 text-neutral-500 hover:bg-white/10 hover:text-neutral-200"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                {PENCIL_ICON}
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={handleDelete}
+              title="Delete"
+              aria-label={`Delete ${node.name}`}
+              className="rounded p-1 text-neutral-500 hover:bg-red-500/10 hover:text-red-400"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                {TRASH_ICON}
+              </svg>
+            </button>
+          </span>
+        )}
       </div>
 
       {isFolder && node.expanded && <FileTree parentId={node.id} depth={depth + 1} />}
