@@ -4,22 +4,19 @@ import { CodeEditor } from '../features/editor/CodeEditor';
 import { LanguageSelector } from '../features/editor/LanguageSelector';
 import { EditorToolbar } from '../features/editor/EditorToolbar';
 import { OutputPanel } from '../features/execution/OutputPanel';
-import { useExecuteCode } from '../hooks/useExecuteCode';
+// import { useExecuteCode } from '../hooks/useExecuteCode';
 import { useWorkspaceStore } from '../state/workspaceStore';
+import { useExecutionStore } from '../state/executionStore';
+import { formatCode, isFormattable } from '../utils/formatCode';
+import { useStreamExecution } from '../hooks/useStreamExecution';
 
 /**
- * Phase 2: the editor is now file-centric rather than language-centric.
+ * Phase 2: the editor is file-centric rather than language-centric.
  *
- * Each file (from the File Explorer / workspaceStore) owns its own
- * `content` and `language`. This replaces Phase 2a's standalone
- * `codeByLanguage: Record<language, code>` map in this component with
- * the more general per-file storage in workspaceStore — exactly the
- * extension that Phase 2a's comments said would happen, not a
- * from-scratch replacement of the idea.
+ * Each file owns its own content and language through workspaceStore.
  *
- * The LanguageSelector still works exactly as before, except it now
- * edits the ACTIVE FILE's language (like VS Code's language-mode
- * picker) instead of switching between independent language "slots".
+ * The LanguageSelector edits the active file's language, similar to
+ * a language-mode picker in VS Code.
  */
 export function EditorPage() {
   const nodes = useWorkspaceStore((s) => s.nodes);
@@ -30,11 +27,16 @@ export function EditorPage() {
 
   const activeFile = activeFileId ? nodes[activeFileId] : undefined;
 
-  const { run, isRunning } = useExecuteCode();
+  // Current execution uses the WebSocket-based execution hook.
+// TODO: Extend the backend protocol later for interactive stdin.
+  // const { run, isRunning } = useExecuteCode();
+  const { run, cancel, isRunning } = useStreamExecution();
+  // Used to show formatting success/errors in the integrated Terminal.
+  const addTerminalLine = useExecutionStore((s) => s.addTerminalLine);
 
-  // Resizable editor/terminal with layout toggle
+  // Resizable editor/terminal with layout toggle.
   const [layout, setLayout] = useState<'horizontal' | 'vertical'>('horizontal');
-  const [panelSize, setPanelSize] = useState(60); // percentage
+  const [panelSize, setPanelSize] = useState(60);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -46,15 +48,16 @@ export function EditorPage() {
       const rect = container.getBoundingClientRect();
 
       let newSize: number;
+
       if (layout === 'horizontal') {
-        // Resize vertically: update height
+        // Resize vertically: update height.
         newSize = ((e.clientY - rect.top) / rect.height) * 100;
       } else {
-        // Resize horizontally: update width
+        // Resize horizontally: update width.
         newSize = ((e.clientX - rect.left) / rect.width) * 100;
       }
 
-      // Minimum 20% for each panel, 20% for other
+      // Minimum 20% for each panel.
       if (newSize >= 20 && newSize <= 80) {
         setPanelSize(newSize);
       }
@@ -67,6 +70,7 @@ export function EditorPage() {
     if (isDragging) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
+
       return () => {
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
@@ -75,10 +79,45 @@ export function EditorPage() {
   }, [isDragging, layout]);
 
   const handleRun = () => {
-    // Backend streaming support required for interactive stdin.
-    // For now, programs run without stdin. Support for live input will be added
-    // when the backend implements streaming execution (SSE/WebSocket).
-    run(activeFile?.content ?? '', activeFile?.language ?? 'plaintext');
+    // Interactive stdin is not supported by the current backend protocol.
+    // stdout/stderr execution continues through the existing execution flow.
+    // Live stdin will be added later using the same WebSocket connection.
+    run(
+      activeFile?.content ?? '',
+      activeFile?.language ?? 'plaintext'
+    );
+  };
+
+  /**
+   * Phase 2: client-side formatting.
+   *
+   * Currently JavaScript is formatted locally using Prettier.
+   * Other languages remain disabled until backend formatting support
+   * is implemented.
+   */
+  const handleFormat = async () => {
+    if (!activeFile) return;
+
+    try {
+      const formatted = await formatCode(
+        activeFile.content ?? '',
+        activeFile.language ?? ''
+      );
+
+      setActiveFileContent(formatted);
+
+      addTerminalLine(
+        'info',
+        `Formatted ${activeFile.name}.`
+      );
+    } catch (err) {
+      addTerminalLine(
+        'error',
+        `Format failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
   };
 
   return (
@@ -90,44 +129,83 @@ export function EditorPage() {
           <section className="flex min-h-0 flex-1 flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <span className="text-sm text-neutral-400">{activeFile.name}</span>
+                <span className="text-sm text-neutral-400">
+                  {activeFile.name}
+                </span>
+
                 <LanguageSelector
                   value={activeFile.language ?? 'plaintext'}
                   onChange={setActiveFileLanguage}
                 />
               </div>
+
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setLayout(layout === 'horizontal' ? 'vertical' : 'horizontal')}
+                  onClick={() =>
+                    setLayout(
+                      layout === 'horizontal'
+                        ? 'vertical'
+                        : 'horizontal'
+                    )
+                  }
                   className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium text-neutral-400 transition hover:bg-neutral-800/40 hover:text-neutral-200"
-                  title={`Switch to ${layout === 'horizontal' ? 'vertical' : 'horizontal'} layout`}
+                  title={`Switch to ${
+                    layout === 'horizontal'
+                      ? 'vertical'
+                      : 'horizontal'
+                  } layout`}
                 >
                   {layout === 'horizontal' ? (
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg
+                      className="h-4 w-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
                       <path d="M8 19h8M8 5h8M3 9h2v6H3M19 9h2v6h-2" />
                     </svg>
                   ) : (
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg
+                      className="h-4 w-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
                       <path d="M19 8v8M5 8v8M9 3v2h6V3M9 19v2h6v-2" />
                     </svg>
                   )}
-                  {layout === 'horizontal' ? 'Vertical' : 'Horizontal'}
+
+                  {layout === 'horizontal'
+                    ? 'Vertical'
+                    : 'Horizontal'}
                 </button>
+
                 <EditorToolbar
                   isRunning={isRunning}
                   onRun={handleRun}
                   onClear={clearActiveFileContent}
+                  onStop={cancel}
+                  onFormat={handleFormat}
+                  canFormat={isFormattable(
+                    activeFile.language ?? ''
+                  )}
                 />
               </div>
             </div>
 
-            {/* Resizable editor and output area */}
-            <div 
-              className={`flex min-h-0 flex-1 ${layout === 'horizontal' ? 'flex-col' : 'flex-row'}`}
+            {/* Resizable editor and terminal area */}
+            <div
+              className={`flex min-h-0 flex-1 ${
+                layout === 'horizontal'
+                  ? 'flex-col'
+                  : 'flex-row'
+              }`}
               ref={containerRef}
             >
               {/* Editor */}
-              <div 
+              <div
                 style={
                   layout === 'horizontal'
                     ? { height: `${panelSize}%` }
@@ -146,7 +224,9 @@ export function EditorPage() {
               <div
                 onMouseDown={() => setIsDragging(true)}
                 className={`bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent transition hover:via-emerald-500/60 ${
-                  isDragging ? 'via-emerald-500/80' : ''
+                  isDragging
+                    ? 'via-emerald-500/80'
+                    : ''
                 } ${
                   layout === 'horizontal'
                     ? 'h-1 w-full cursor-row-resize'
@@ -156,8 +236,8 @@ export function EditorPage() {
                 aria-label={`Resize editor and terminal (${layout} layout)`}
               />
 
-              {/* Output Panel */}
-              <div 
+              {/* Integrated Terminal */}
+              <div
                 style={
                   layout === 'horizontal'
                     ? { height: `${100 - panelSize}%` }

@@ -1,49 +1,39 @@
 interface EditorToolbarProps {
   onRun: () => void;
+  onStop: () => void;
   onClear: () => void;
+  onFormat: () => void;
   isRunning: boolean;
+  /** True only for languages formatCode.ts can actually format
+   *  client-side today (currently just 'javascript'). */
+  canFormat: boolean;
 }
 
-/**
- * Format is intentionally disabled — there is no formatting endpoint
- * or in-browser formatter wired up yet. Showing it as a disabled button
- * with a clear tooltip is preferable to hiding it entirely, since the
- * requirement is to design for the complete feature set without
- * pretending unfinished pieces work.
- */
-export function EditorToolbar({ onRun, onClear, isRunning }: EditorToolbarProps) {
+export function EditorToolbar({
+  onRun,
+  onStop,
+  onClear,
+  onFormat,
+  isRunning,
+  canFormat,
+}: EditorToolbarProps) {
   return (
     <div className="flex items-center gap-2">
       <button
         type="button"
-        onClick={onRun}
-        disabled={isRunning}
-        className="flex items-center gap-2 rounded-md bg-emerald-500 px-4 py-1.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 disabled:cursor-not-allowed disabled:bg-emerald-500/40"
+        onClick={isRunning ? onStop : onRun}
+        className={`flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 ${
+          isRunning
+            ? 'bg-red-500/90 text-neutral-950 hover:bg-red-500'
+            : 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
+        }`}
       >
         {isRunning ? (
           <>
-            <svg
-              className="h-3.5 w-3.5 animate-spin"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-            >
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeOpacity="0.3"
-              />
-              <path
-                d="M21 12a9 9 0 0 0-9-9"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-              />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="1.5" />
             </svg>
-            Running…
+            Stop
           </>
         ) : (
           <>
@@ -66,9 +56,14 @@ export function EditorToolbar({ onRun, onClear, isRunning }: EditorToolbarProps)
 
       <button
         type="button"
-        disabled
-        title="Code formatting is not implemented yet"
-        className="cursor-not-allowed rounded-md border border-white/5 px-3 py-1.5 text-sm text-neutral-600"
+        onClick={onFormat}
+        disabled={isRunning || !canFormat}
+        title={
+          canFormat
+            ? 'Format this file'
+            : "Formatting isn't available for this language yet"
+        }
+        className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-neutral-300 transition hover:bg-white/5 hover:text-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500 disabled:cursor-not-allowed disabled:border-white/5 disabled:text-neutral-600 disabled:hover:bg-transparent"
       >
         Format
       </button>

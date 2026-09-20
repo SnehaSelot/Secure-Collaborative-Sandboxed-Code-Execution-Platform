@@ -12,8 +12,9 @@ const BADGE_STYLES: Record<ComingSoonPageProps['badge'], string> = {
 
 /**
  * Used for every route whose backend doesn't exist yet (/sessions,
- * /collaboration, /risk, /admin). Deliberately makes no API calls —
+ * /collaboration, /admin). Deliberately makes no API calls —
  * per project rules, unavailable features must not appear functional.
+ * (/risk now has a local-heuristic preview — see pages/RiskAnalysisPage.tsx.)
  */
 export function ComingSoonPage({ title, description, badge }: ComingSoonPageProps) {
   return (

@@ -11,13 +11,18 @@ interface TerminalLine {
 
 /**
  * Execution state is global (not local component state) because the
- * Run button (EditorToolbar), the output display (OutputPanel), and the
+ * Run button (EditorToolbar), the terminal display (OutputPanel), and the
  * status badge (ExecutionStatusBadge) all need to read/react to the same
  * in-flight run without prop-drilling through EditorPage.
  *
- * Per project convention, this store holds ONLY execution state — UI
- * state that doesn't need to be shared (e.g. "is the settings dropdown
- * open") stays as local useState in whatever component owns it.
+ * NOTE ON STDIN: there is intentionally no `stdin` field here. The
+ * current /ws/execute protocol is one-shot — client sends
+ * { language, code } once, server streams stdout/stderr/result back —
+ * there is no channel for the client to send more messages once
+ * execution has started. See the TODO in api/streamExecution.ts for
+ * what a future bidirectional protocol needs before stdin can be
+ * added back in, at which point it belongs here as e.g.
+ * `sendInput: (text: string) => void` backed by the same live socket.
  */
 interface ExecutionState {
   isRunning: boolean;
@@ -25,20 +30,19 @@ interface ExecutionState {
   error: string | null;
   lastCode: string | null;
   lastLanguage: string | null;
-  /** The stdin textarea's current value — lives here (not local state)
-   *  so useExecuteCode.ts can read it without prop-drilling from
-   *  EditorPage.tsx down into StdinInput.tsx. */
-  stdin: string;
   /** Terminal history — lines of output/input/errors */
   terminalLines: TerminalLine[];
+  /** Set by the /ws/execute stream when a stream hits the 20k-char cap. */
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
 
   startExecution: (code: string, language: string) => void;
   setResult: (result: ExecuteResponse) => void;
   setError: (error: string) => void;
   resetExecution: () => void;
-  setStdin: (stdin: string) => void;
   addTerminalLine: (type: TerminalLine['type'], text: string) => void;
   clearTerminal: () => void;
+  setTruncated: (which: 'stdout' | 'stderr') => void;
 }
 
 export const useExecutionStore = create<ExecutionState>((set) => ({
@@ -47,8 +51,9 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
   error: null,
   lastCode: null,
   lastLanguage: null,
-  stdin: '',
   terminalLines: [],
+  stdoutTruncated: false,
+  stderrTruncated: false,
 
   startExecution: (code, language) =>
     set({
@@ -57,6 +62,9 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
       result: null,
       lastCode: code,
       lastLanguage: language,
+      terminalLines: [],
+      stdoutTruncated: false,
+      stderrTruncated: false,
     }),
 
   setResult: (result) =>
@@ -82,11 +90,6 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
       lastLanguage: null,
     }),
 
-  // Deliberately does NOT touch isRunning/result/error/lastCode/lastLanguage
-  // — resetExecution() is for clearing a run's outcome; this is just the
-  // input box, and should survive a Clear/re-run untouched.
-  setStdin: (stdin) => set({ stdin }),
-
   addTerminalLine: (type, text) =>
     set((state) => ({
       terminalLines: [...state.terminalLines, { type, text }],
@@ -94,4 +97,7 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
 
   clearTerminal: () =>
     set({ terminalLines: [] }),
+
+  setTruncated: (which) =>
+    set(which === 'stdout' ? { stdoutTruncated: true } : { stderrTruncated: true }),
 }));
