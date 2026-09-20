@@ -3,6 +3,7 @@ import { MainLayout } from '../layouts/MainLayout';
 import { EditorPage } from '../pages/EditorPage';
 import { ComingSoonPage } from '../pages/ComingSoonPage';
 import { RiskAnalysisPage } from '../pages/RiskAnalysisPage';
+import { SessionsPage } from '../pages/SessionsPage';
 
 /**
  * Central route table. Every route unavailable-by-backend renders
@@ -15,16 +16,7 @@ export function AppRoutes() {
       <Route element={<MainLayout />}>
         <Route path="/" element={<Navigate to="/editor" replace />} />
         <Route path="/editor" element={<EditorPage />} />
-        <Route
-          path="/sessions"
-          element={
-            <ComingSoonPage
-              title="Sessions"
-              description="Session creation, joining, and history will appear here once the workspace service exists."
-              badge="Coming Soon"
-            />
-          }
-        />
+        <Route path="/sessions" element={<SessionsPage />} />
         <Route
           path="/collaboration"
           element={
