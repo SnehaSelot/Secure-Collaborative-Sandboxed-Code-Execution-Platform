@@ -34,3 +34,6 @@ export const EXECUTE_TIMEOUT_MS = 120_000;
 
 /** How often the header polls GET /health to show live connection status. */
 export const HEALTH_POLL_INTERVAL_MS = 15_000;
+
+/** Default max characters for standard input (mirrors backend MAX_STDIN_CHARS). */
+export const MAX_STDIN_CHARS = 65_536;

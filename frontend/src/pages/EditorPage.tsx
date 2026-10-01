@@ -4,8 +4,10 @@ import { CodeEditor } from '../features/editor/CodeEditor';
 import { LanguageSelector } from '../features/editor/LanguageSelector';
 import { EditorToolbar } from '../features/editor/EditorToolbar';
 import { OutputPanel } from '../features/execution/OutputPanel';
+import { StdinInput } from '../features/execution/StdinInput';
 import { useExecuteCode } from '../hooks/useExecuteCode';
 import { useWorkspaceStore } from '../state/workspaceStore';
+import { useExecutionStore } from '../state/executionStore';
 
 /**
  * Phase 2: the editor is now file-centric rather than language-centric.
@@ -31,6 +33,7 @@ export function EditorPage() {
   const activeFile = activeFileId ? nodes[activeFileId] : undefined;
 
   const { run, isRunning } = useExecuteCode();
+  const stdin = useExecutionStore((s) => s.stdin);
 
   // Resizable editor/terminal with layout toggle
   const [layout, setLayout] = useState<'horizontal' | 'vertical'>('horizontal');
@@ -75,10 +78,10 @@ export function EditorPage() {
   }, [isDragging, layout]);
 
   const handleRun = () => {
-    // Backend streaming support required for interactive stdin.
-    // For now, programs run without stdin. Support for live input will be added
-    // when the backend implements streaming execution (SSE/WebSocket).
-    run(activeFile?.content ?? '', activeFile?.language ?? 'plaintext');
+    // Pass the current stdin value from the store. The useExecuteCode hook
+    // omits it from the request when blank, so programs that don't use stdin
+    // behave exactly as before.
+    run(activeFile?.content ?? '', activeFile?.language ?? 'plaintext', stdin);
   };
 
   return (
@@ -156,15 +159,16 @@ export function EditorPage() {
                 aria-label={`Resize editor and terminal (${layout} layout)`}
               />
 
-              {/* Output Panel */}
+              {/* Stdin + Output Panel */}
               <div 
                 style={
                   layout === 'horizontal'
                     ? { height: `${100 - panelSize}%` }
                     : { width: `${100 - panelSize}%` }
                 }
-                className="flex min-h-0 min-w-0 flex-col overflow-hidden"
+                className="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden"
               >
+                <StdinInput />
                 <OutputPanel />
               </div>
             </div>

@@ -150,7 +150,45 @@ def _truncate(text: str) -> str:
     return text[:MAX_OUTPUT_CHARS] + f"\n...[truncated, {len(text)} chars total]"
 
 
-def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
+def _send_stdin_and_close(stdin_socket, stdin: str) -> None:
+    """Send *stdin* to a pre-attached stdin socket, then shutdown and close to signal EOF.
+
+    Runs in a background daemon thread so that if the process writes stdout before
+    or during stdin consumption, socket buffers do not deadlock.
+    """
+    def _feeder():
+        try:
+            raw_data = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
+            sock = getattr(stdin_socket, "_sock", stdin_socket)
+            if hasattr(sock, "sendall"):
+                sock.sendall(raw_data)
+            elif hasattr(stdin_socket, "sendall"):
+                stdin_socket.sendall(raw_data)
+            elif hasattr(stdin_socket, "write"):
+                stdin_socket.write(raw_data)
+
+            try:
+                if hasattr(sock, "shutdown"):
+                    sock.shutdown(1)  # socket.SHUT_WR
+                elif hasattr(stdin_socket, "shutdown"):
+                    stdin_socket.shutdown(1)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        finally:
+            try:
+                stdin_socket.close()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_feeder, daemon=True)
+    t.start()
+
+
+def run_code(
+    client: docker.DockerClient, language: str, code: str, stdin: str = ""
+) -> dict:
     if language not in LANGUAGE_IMAGES:
         raise ValueError(f"Unsupported language: {language}")
     if not code:
@@ -169,12 +207,12 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
         command = RUN_COMMANDS[language](container_path)
 
         try:
-            container = client.containers.run(
+            container = client.containers.create(
                 LANGUAGE_IMAGES[language],
                 command,
                 volumes={bind_source: {"bind": CODE_MOUNT_DIR, "mode": "ro"}},
                 working_dir=CODE_MOUNT_DIR,
-                detach=True,
+                stdin_open=bool(stdin),
                 mem_limit="256m",
                 nano_cpus=500_000_000,
                 pids_limit=PIDS_LIMIT.get(language, 64),
@@ -191,6 +229,19 @@ def run_code(client: docker.DockerClient, language: str, code: str) -> dict:
                 environment=["HOME=/tmp"] + EXTRA_ENV.get(language, []),
                 labels={"sandbox": "exec-service"},
             )
+
+            # Pre-attach stdin socket before start if stdin is provided so Docker
+            # respects StdinOnce and cleanly sends EOF when closed.
+            stdin_socket = None
+            if stdin:
+                stdin_socket = client.api.attach_socket(
+                    container.id, params={"stdin": 1, "stream": 1}
+                )
+
+            container.start()
+
+            if stdin_socket is not None:
+                _send_stdin_and_close(stdin_socket, stdin)
 
             try:
                 result = container.wait(
@@ -301,6 +352,7 @@ def stream_run_code(
     code: str,
     emit: Callable[[dict], None],
     container_holder: ContainerHolder,
+    stdin: str = "",
 ) -> tuple[int | None, str, float]:
     """Run *code* in the sandbox and call *emit* for each stdout/stderr chunk.
 
@@ -322,6 +374,10 @@ def stream_run_code(
     container_holder:
         Receives the container ID immediately after the container starts so
         that the async caller can kill it on timeout.
+    stdin:
+        Optional string to feed to the program's standard input.  All data
+        is written upfront after the container starts, then the socket is
+        closed to signal EOF.
 
     Returns
     -------
@@ -356,6 +412,7 @@ def stream_run_code(
                 command,
                 volumes={bind_source: {"bind": CODE_MOUNT_DIR, "mode": "ro"}},
                 working_dir=CODE_MOUNT_DIR,
+                stdin_open=bool(stdin),
                 mem_limit="256m",
                 nano_cpus=500_000_000,
                 pids_limit=PIDS_LIMIT.get(language, 64),
@@ -402,9 +459,20 @@ def stream_run_code(
             # immediately, without waiting for the container to exit first.
             container_holder.set_stream(attach_stream)
 
+            # Pre-attach stdin socket before start if stdin is provided so Docker
+            # respects StdinOnce and cleanly sends EOF when closed.
+            stdin_socket = None
+            if stdin:
+                stdin_socket = client.api.attach_socket(
+                    container_id, params={"stdin": 1, "stream": 1}
+                )
+
             # Start container only AFTER attaching, guaranteeing no initial
             # output is ever missed due to race conditions.
             container.start()
+
+            if stdin_socket is not None:
+                _send_stdin_and_close(stdin_socket, stdin)
 
             try:
                 for stdout_chunk, stderr_chunk in attach_stream:

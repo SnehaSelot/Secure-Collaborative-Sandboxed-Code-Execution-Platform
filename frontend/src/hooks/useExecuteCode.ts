@@ -35,11 +35,11 @@ export function useExecuteCode() {
       startExecution(code, language);
 
       try {
-        const trimmedStdin = stdin?.trim();
+        const hasStdin = Boolean(stdin && stdin.length > 0);
         const result = await executeCode({
           code,
           language,
-          ...(trimmedStdin ? { stdin: trimmedStdin } : {}),
+          ...(hasStdin ? { stdin } : {}),
         });
         setResult(result);
       } catch (err) {

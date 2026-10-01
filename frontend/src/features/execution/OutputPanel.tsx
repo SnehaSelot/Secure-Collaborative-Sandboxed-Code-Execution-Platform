@@ -6,7 +6,8 @@ import { ExecutionStatusBadge } from './ExecutionStatusBadge';
  * Output panel that displays program execution results.
  * - Stdout and stderr from the executed code
  * - Execution status and metadata (exit code, runtime)
- * - Note: Interactive terminal input requires backend streaming support (not yet implemented)
+ * - Stdin is handled by the StdinInput component rendered above this panel
+ *   in EditorPage; it is passed to the backend at run time.
  */
 export function OutputPanel() {
   const isRunning = useExecutionStore((s) => s.isRunning);
@@ -56,17 +57,13 @@ export function OutputPanel() {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Terminal output area */}
         <div className="flex-1 overflow-auto p-4 font-mono text-sm">
-{/* Empty state message */}
-        {terminalLines.length === 0 && !isRunning && !result && !error && (
-          <div className="flex-1 p-4">
+
+          {/* Empty state */}
+          {terminalLines.length === 0 && !isRunning && !result && !error && (
             <p className="text-sm text-neutral-600">Run your code to see output here.</p>
-            <p className="mt-2 text-xs text-neutral-500">
-              <strong>Note:</strong> Interactive terminal input requires backend streaming support, which is not yet implemented. 
-              For now, pass input as command-line arguments or modify the backend to support streaming execution.
-            </p>
-          </div>
           )}
 
+          {/* Spinner while running */}
           {isRunning && terminalLines.length === 0 && (
             <div className="flex items-center gap-2 text-neutral-400">
               <svg
@@ -132,19 +129,6 @@ export function OutputPanel() {
 
           <div ref={terminalEndRef} />
         </div>
-
-        {/* Input field disabled: requires backend streaming support */}
-        {/* BACKEND INTEGRATION POINT: When /execute endpoint supports streaming responses
-             (Server-Sent Events or WebSocket), replace this note with a live input field
-             that sends stdin data to the running process in real-time. */}
-        {!isRunning && (
-          <div className="border-t border-white/10 bg-neutral-900/40 p-3">
-            <p className="text-xs text-neutral-500">
-              <span className="font-medium text-neutral-400">Live input not available:</span> Interactive stdin requires backend support for streaming execution. 
-              This will be implemented in a future release.
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );

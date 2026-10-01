@@ -31,6 +31,16 @@ interface ExecutionState {
   stdin: string;
   /** Terminal history — lines of output/input/errors */
   terminalLines: TerminalLine[];
+  /**
+   * Accumulated stdout text from the current (or most recent) WS run.
+   * Appended incrementally as chunks arrive; reset on each new run.
+   */
+  streamedStdout: string;
+  /**
+   * Accumulated stderr text from the current (or most recent) WS run.
+   * Appended incrementally as chunks arrive; reset on each new run.
+   */
+  streamedStderr: string;
 
   startExecution: (code: string, language: string) => void;
   setResult: (result: ExecuteResponse) => void;
@@ -39,6 +49,14 @@ interface ExecutionState {
   setStdin: (stdin: string) => void;
   addTerminalLine: (type: TerminalLine['type'], text: string) => void;
   clearTerminal: () => void;
+  /**
+   * Append a chunk of text to the streamed stdout or stderr accumulator.
+   * Used by the WebSocket path to build output incrementally without
+   * replacing the whole string on every chunk.
+   */
+  appendStreamChunk: (stream: 'stdout' | 'stderr', chunk: string) => void;
+  /** Append an info notice (e.g. "[stdout truncated]") to terminal lines. */
+  appendTruncationNotice: (stream: 'stdout' | 'stderr') => void;
 }
 
 export const useExecutionStore = create<ExecutionState>((set) => ({
@@ -49,6 +67,8 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
   lastLanguage: null,
   stdin: '',
   terminalLines: [],
+  streamedStdout: '',
+  streamedStderr: '',
 
   startExecution: (code, language) =>
     set({
@@ -57,6 +77,8 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
       result: null,
       lastCode: code,
       lastLanguage: language,
+      streamedStdout: '',
+      streamedStderr: '',
     }),
 
   setResult: (result) =>
@@ -80,6 +102,8 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
       error: null,
       lastCode: null,
       lastLanguage: null,
+      streamedStdout: '',
+      streamedStderr: '',
     }),
 
   // Deliberately does NOT touch isRunning/result/error/lastCode/lastLanguage
@@ -94,4 +118,22 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
 
   clearTerminal: () =>
     set({ terminalLines: [] }),
+
+  appendStreamChunk: (stream, chunk) =>
+    set((state) =>
+      stream === 'stdout'
+        ? { streamedStdout: state.streamedStdout + chunk }
+        : { streamedStderr: state.streamedStderr + chunk },
+    ),
+
+  appendTruncationNotice: (stream) =>
+    set((state) => ({
+      terminalLines: [
+        ...state.terminalLines,
+        {
+          type: 'info' as const,
+          text: `[${stream} output truncated by server]`,
+        },
+      ],
+    })),
 }));
