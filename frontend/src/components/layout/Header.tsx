@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useHealth } from '../../hooks/useHealth';
 
 /**
@@ -50,11 +51,11 @@ export function Header() {
           {label}
         </div>
 
-        <button
-          type="button"
+        <Link
+          to="/settings"
           className="rounded-md p-2 text-neutral-400 transition hover:bg-white/5 hover:text-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500"
           aria-label="Settings"
-          title="Settings — coming soon"
+          title="Settings"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path
@@ -69,15 +70,23 @@ export function Header() {
               strokeLinejoin="round"
             />
           </svg>
-        </button>
+        </Link>
 
-        <div
+        <Link
+          to="/profile"
           className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-700 text-xs font-medium text-neutral-200"
-          title="User profile — coming soon"
-          aria-label="User avatar placeholder"
+          title="User profile"
+          aria-label="User profile"
         >
-          GH
-        </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
+        </Link>
       </div>
     </header>
   );

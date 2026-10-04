@@ -18,6 +18,7 @@ export function useStreamExecution() {
   const startExecution = useExecutionStore((s) => s.startExecution);
   const setResult = useExecutionStore((s) => s.setResult);
   const setError = useExecutionStore((s) => s.setError);
+  const resetExecution = useExecutionStore((s) => s.resetExecution);
   const addTerminalLine = useExecutionStore((s) => s.addTerminalLine);
   const setTruncated = useExecutionStore((s) => s.setTruncated);
   const isRunning = useExecutionStore((s) => s.isRunning);
@@ -56,7 +57,8 @@ export function useStreamExecution() {
   const cancel = useCallback(() => {
     cancelRef.current?.();
     cancelRef.current = null;
-  }, []);
+    resetExecution();
+  }, [resetExecution]);
 
   return { run, cancel, isRunning };
 }

@@ -4,6 +4,8 @@ import { EditorPage } from '../pages/EditorPage';
 import { ComingSoonPage } from '../pages/ComingSoonPage';
 import { RiskAnalysisPage } from '../pages/RiskAnalysisPage';
 import { SessionsPage } from '../pages/SessionsPage';
+import { SettingsPage } from '../pages/SettingsPage';
+import { ProfilePage } from '../pages/ProfilePage';
 
 /**
  * Central route table. Every route unavailable-by-backend renders
@@ -16,6 +18,8 @@ export function AppRoutes() {
       <Route element={<MainLayout />}>
         <Route path="/" element={<Navigate to="/editor" replace />} />
         <Route path="/editor" element={<EditorPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route
           path="/collaboration"

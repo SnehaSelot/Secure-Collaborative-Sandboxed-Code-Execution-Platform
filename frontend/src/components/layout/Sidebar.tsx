@@ -149,12 +149,18 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-white/10 p-3">
-        <button
-          type="button"
-          title={collapsed ? 'Settings — coming soon' : 'Settings — coming soon, no persistence backend yet'}
-          className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-neutral-500 transition hover:bg-white/5 hover:text-neutral-300 ${
-            collapsed ? 'justify-center' : ''
-          }`}
+        <NavLink
+          to="/settings"
+          title={collapsed ? 'Settings' : undefined}
+          className={({ isActive }) =>
+            `flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition ${
+              collapsed ? 'justify-center' : ''
+            } ${
+              isActive
+                ? 'bg-emerald-500/10 text-emerald-400'
+                : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-100'
+            }`
+          }
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
             {ICONS.settings}
@@ -162,12 +168,9 @@ export function Sidebar() {
           {!collapsed && (
             <>
               <span className="flex-1 text-left">Settings</span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] leading-none text-neutral-400">
-                Coming Soon
-              </span>
             </>
           )}
-        </button>
+        </NavLink>
 
         <button
           type="button"
