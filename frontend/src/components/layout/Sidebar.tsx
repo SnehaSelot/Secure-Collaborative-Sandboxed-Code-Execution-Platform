@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 
-type Badge = 'Coming Soon' | 'Preview' | 'Backend Required';
+type Badge = 'Coming Soon' | 'Backend Required';
 
 interface NavItem {
   to: string;
@@ -77,19 +77,17 @@ const ICONS = {
 const NAV_ITEMS: NavItem[] = [
   { to: '/editor', label: 'Editor', icon: ICONS.editor },
  {
-    to: '/collaboration',
-    label: 'Collaboration',
-    icon: ICONS.collaboration,
-    badge: 'Coming Soon',
-  },
-    { to: '/sessions', label: 'Sessions', icon: ICONS.sessions, badge: 'Preview' },
-  { to: '/risk', label: 'Risk Analysis', icon: ICONS.risk, badge: 'Preview' },
+   to: '/collaboration',
+   label: 'Collaboration',
+   icon: ICONS.collaboration,
+ },
+ { to: '/sessions', label: 'Sessions', icon: ICONS.sessions },
+  { to: '/risk', label: 'Risk Analysis', icon: ICONS.risk },
   { to: '/admin', label: 'Admin', icon: ICONS.admin, badge: 'Backend Required' },
 ];
 
 const BADGE_STYLES: Record<Badge, string> = {
   'Coming Soon': 'bg-white/5 text-neutral-400 border-white/10',
-  Preview: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   'Backend Required': 'bg-red-500/10 text-red-400 border-red-500/20',
 };
 

@@ -1,12 +1,10 @@
 interface ComingSoonPageProps {
   title: string;
   description: string;
-  badge: 'Coming Soon' | 'Preview' | 'Backend Required';
+  badge: 'Backend Required';
 }
 
 const BADGE_STYLES: Record<ComingSoonPageProps['badge'], string> = {
-  'Coming Soon': 'bg-white/5 text-neutral-400 border-white/10',
-  Preview: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   'Backend Required': 'bg-red-500/10 text-red-400 border-red-500/20',
 };
 

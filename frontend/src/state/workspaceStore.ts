@@ -36,6 +36,7 @@ interface WorkspaceState {
   openFile: (id: string) => void;
   toggleFolder: (id: string) => void;
   setActiveFileContent: (content: string) => void;
+  setFileContent: (id: string, content: string) => void;
   setActiveFileLanguage: (language: string) => void;
   clearActiveFileContent: () => void;
 }
@@ -178,14 +179,29 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       },
 
       setActiveFileContent: (content) => {
+        const activeFileId = get().activeFileId;
+        if (activeFileId) {
+          get().setFileContent(activeFileId, content);
+        }
+      },
+
+      setFileContent: (id, content) => {
         set((state) => {
-          if (!state.activeFileId) return state;
-          const active = state.nodes[state.activeFileId];
-          if (!active || !active.language) return state;
-          // Save content to both convenience field and per-language storage
-          const codeByLanguage = { ...(active.codeByLanguage || {}), [active.language]: content };
+          const file = state.nodes[id];
+          if (!file || file.type !== 'file') return state;
+
+          const codeByLanguage = file.language
+            ? { ...(file.codeByLanguage || {}), [file.language]: content }
+            : file.codeByLanguage;
+          if (
+            file.content === content &&
+            (!file.language || file.codeByLanguage?.[file.language] === content)
+          ) {
+            return state;
+          }
+
           return {
-            nodes: { ...state.nodes, [state.activeFileId]: { ...active, content, codeByLanguage } },
+            nodes: { ...state.nodes, [id]: { ...file, content, codeByLanguage } },
           };
         });
       },

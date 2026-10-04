@@ -11,4 +11,5 @@ export const env = {
     /^http/,
     'ws',
   ),
+  collaborationWsBaseUrl: import.meta.env.VITE_COLLABORATION_WS_URL ?? null,
 } as const;

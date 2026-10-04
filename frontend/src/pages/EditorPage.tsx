@@ -1,13 +1,39 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { FileExplorer } from '../features/explorer/FileExplorer';
 import { CodeEditor } from '../features/editor/CodeEditor';
 import { LanguageSelector } from '../features/editor/LanguageSelector';
 import { EditorToolbar } from '../features/editor/EditorToolbar';
 import { OutputPanel } from '../features/execution/OutputPanel';
+import { ParticipantPresence } from '../features/editor/ParticipantPresence';
 import { useWorkspaceStore } from '../state/workspaceStore';
 import { useExecutionStore } from '../state/executionStore';
+import { getFileDocumentContent } from '../state/fileDocumentRegistry';
 import { formatCode, isFormattable } from '../utils/formatCode';
 import { useStreamExecution } from '../hooks/useStreamExecution';
+import type { ProviderSnapshot } from '../collaboration/provider';
+
+interface FileProviderStatus {
+  fileId: string;
+  snapshot: ProviderSnapshot;
+}
+
+const PROVIDER_STATUS_STYLES: Record<ProviderSnapshot['status'], string> = {
+  'local-only': 'border-neutral-700 bg-neutral-800/70 text-neutral-400',
+  connecting: 'border-amber-500/20 bg-amber-500/10 text-amber-400',
+  connected: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400',
+  offline: 'border-neutral-600 bg-neutral-800/70 text-neutral-400',
+  syncing: 'border-blue-500/20 bg-blue-500/10 text-blue-400',
+  error: 'border-red-500/20 bg-red-500/10 text-red-400',
+};
+
+const PROVIDER_STATUS_LABELS: Record<ProviderSnapshot['status'], string> = {
+  'local-only': 'Local only',
+  connecting: 'Connecting',
+  connected: 'Connected',
+  offline: 'Offline',
+  syncing: 'Syncing',
+  error: 'Collaboration error',
+};
 
 /**
  * Phase 2: the editor is file-centric rather than language-centric.
@@ -25,13 +51,16 @@ export function EditorPage() {
   const clearActiveFileContent = useWorkspaceStore((s) => s.clearActiveFileContent);
 
   const activeFile = activeFileId ? nodes[activeFileId] : undefined;
+  const [providerStatus, setProviderStatus] = useState<FileProviderStatus | null>(null);
+  const handleProviderStatus = useCallback((fileId: string, snapshot: ProviderSnapshot) => {
+    setProviderStatus({ fileId, snapshot });
+  }, []);
+  const activeProviderSnapshot =
+    providerStatus && providerStatus.fileId === activeFile?.id ? providerStatus.snapshot : null;
 
   const { run, cancel, isRunning } = useStreamExecution();
   // Used to show formatting success/errors in the integrated Terminal.
   const addTerminalLine = useExecutionStore((s) => s.addTerminalLine);
-  // Sent once, upfront, when Run is clicked — see executionStore.ts's note.
-  const stdin = useExecutionStore((s) => s.stdin);
-
   // Resizable editor/terminal with layout toggle.
   const [layout, setLayout] = useState<'horizontal' | 'vertical'>('horizontal');
   const [panelSize, setPanelSize] = useState(60);
@@ -77,7 +106,15 @@ export function EditorPage() {
   }, [isDragging, layout]);
 
   const handleRun = () => {
-    run(activeFile?.content ?? '', activeFile?.language ?? 'plaintext', stdin);
+    const { activeFileId: currentFileId, nodes: currentNodes } = useWorkspaceStore.getState();
+    if (!currentFileId) return;
+
+    const currentFile = currentNodes[currentFileId];
+    if (!currentFile || currentFile.type !== 'file') return;
+
+    const code = getFileDocumentContent(currentFileId) ?? currentFile.content ?? '';
+    const currentStdin = useExecutionStore.getState().stdin;
+    run(code, currentFile.language ?? 'plaintext', currentStdin);
   };
 
   /**
@@ -110,6 +147,19 @@ export function EditorPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="text-sm text-neutral-400">{activeFile.name}</span>
+              {activeProviderSnapshot && (
+                <>
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${PROVIDER_STATUS_STYLES[activeProviderSnapshot.status]}`}
+                    role="status"
+                    aria-live="polite"
+                    title={activeProviderSnapshot.message}
+                  >
+                    {PROVIDER_STATUS_LABELS[activeProviderSnapshot.status]}
+                  </span>
+                  <ParticipantPresence awareness={activeProviderSnapshot.awareness} />
+                </>
+              )}
 
               <LanguageSelector
                 value={activeFile.language ?? 'plaintext'}
@@ -160,9 +210,10 @@ export function EditorPage() {
               className="flex min-h-0 min-w-0 flex-col overflow-hidden"
             >
               <CodeEditor
+                key={activeFile.id}
+                fileId={activeFile.id}
                 language={activeFile.language ?? 'plaintext'}
-                value={activeFile.content ?? ''}
-                onChange={setActiveFileContent}
+                onProviderStatus={handleProviderStatus}
               />
             </div>
 
