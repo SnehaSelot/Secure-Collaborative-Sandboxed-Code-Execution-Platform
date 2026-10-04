@@ -4,37 +4,43 @@
  * backend doesn't actually return.
  */
 
-/** BACKEND INTEGRATION: GET /health response shape. Status: Available. */
 export interface HealthResponse {
   status: 'ok';
 }
 
-/** BACKEND INTEGRATION: GET /languages response shape. Status: Available. */
 export interface LanguagesResponse {
   languages: string[];
 }
 
-/** BACKEND INTEGRATION: GET /limits response shape. Status: Available. */
+/**
+ * BACKEND INTEGRATION: GET /limits response shape. Status: Available.
+ * timeout_seconds is a per-language dict (not a single number) — see
+ * backend/app/services/executor.py's TIMEOUT_SECONDS constant, e.g.
+ * { python: 15, javascript: 15, java: 30, c: 20, cpp: 20, go: 60, rust: 60 }.
+ * max_stdin_chars mirrors executor.py's MAX_STDIN_CHARS (65_536).
+ */
 export interface LimitsResponse {
-  timeout_seconds: number;
+  timeout_seconds: Record<string, number>;
   memory_limit: string;
   max_processes: number;
   max_open_files: number;
   max_file_size_bytes: number;
   max_output_chars: number;
+  max_stdin_chars: number;
 }
 
-/** BACKEND INTEGRATION: POST /execute request shape. Status: Available. */
+/** BACKEND INTEGRATION: POST /execute request shape. Status: Available.
+ * stdin is sent upfront and closed (EOF) right after the container starts —
+ * it's NOT live/interactive, so it can only be set before Run, not while
+ * isRunning. See backend/app/services/executor.py's _send_stdin_and_close. */
 export interface ExecuteRequest {
   language: string;
   code: string;
-  /** Optional — only sent when non-empty. Piped to the program's stdin. */
   stdin?: string;
 }
 
 export type ExecutionStatus = 'success' | 'error' | 'timeout' | 'internal_error';
 
-/** BACKEND INTEGRATION: POST /execute response shape. Status: Available. */
 export interface ExecuteResponse {
   stdout: string;
   stderr: string;
@@ -43,11 +49,6 @@ export interface ExecuteResponse {
   execution_time: number;
 }
 
-/**
- * Shape of FastAPI's error responses (400 / 422 / 500), per BACKEND_API.md.
- * 422 returns an array under `detail`; 400/500 return a string. Both are
- * covered so client.ts can normalize either into a plain message.
- */
 export interface ApiErrorDetailItem {
   type: string;
   loc: (string | number)[];

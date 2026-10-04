@@ -9,7 +9,7 @@ import { useExecutionStore } from '../state/executionStore';
  * Status: Available
  * Request: { language: string, code: string, stdin?: string }
  * Response: { stdout, stderr, exit_code, status, execution_time }
- * TODO: Keep this function isolated so the endpoint can be changed later.
+ * stdin is sent upfront, not interactively — see api/types.ts's note.
  *
  * Never writes a fake success result on failure — a thrown/caught error
  * always goes to setError, never to setResult, so the UI can't display
@@ -22,11 +22,7 @@ export function useExecuteCode() {
   const isRunning = useExecutionStore((s) => s.isRunning);
 
   const run = useCallback(
-    // stdin is optional and, when blank, simply omitted from the request —
-    // this keeps the request byte-for-byte identical to before for any
-    // program that isn't using it, matching the backend's own no-stdin
-    // fast path.
-    async (code: string, language: string, stdin?: string) => {
+    async (code: string, language: string, stdin = '') => {
       if (!code.trim()) {
         setError('Code cannot be empty.');
         return;
@@ -35,12 +31,7 @@ export function useExecuteCode() {
       startExecution(code, language);
 
       try {
-        const trimmedStdin = stdin?.trim();
-        const result = await executeCode({
-          code,
-          language,
-          ...(trimmedStdin ? { stdin: trimmedStdin } : {}),
-        });
+        const result = await executeCode({ code, language, stdin });
         setResult(result);
       } catch (err) {
         setError(extractErrorMessage(err));
