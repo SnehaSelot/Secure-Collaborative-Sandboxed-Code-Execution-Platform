@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { getLanguageTemplate, detectLanguageFromFilename } from '../config/languageTemplates';
 import { DEFAULT_LANGUAGE } from '../config/constants';
 
@@ -63,13 +64,12 @@ function collectIdsToDelete(nodes: Record<string, FileSystemNode>, rootId: strin
  * something open on first load — matches the Phase 1 behavior of
  * opening with a working Python example.
  *
- * PERSISTENCE NOTE: this is in-memory only (Zustand), matching Part 5's
- * "frontend state" option — nothing here calls localStorage or a
- * backend. Swapping to localStorage later means wrapping this store
- * with Zustand's `persist` middleware; swapping to real backend
- * persistence means replacing these actions' bodies with API calls
- * while keeping the same action names/signatures, so FileExplorer.tsx
- * and EditorPage.tsx would not need to change.
+ * PERSISTENCE NOTE: persisted to localStorage via Zustand's `persist`
+ * middleware (see the bottom of this file) — this is exactly the
+ * upgrade path this comment used to describe as future work. Swapping
+ * to real backend persistence later means replacing these actions'
+ * bodies with API calls while keeping the same action names/signatures,
+ * so FileExplorer.tsx and EditorPage.tsx would not need to change.
  */
 function seedWorkspace(): { nodes: Record<string, FileSystemNode>; activeFileId: string } {
   const mainId = makeId();
@@ -86,132 +86,142 @@ function seedWorkspace(): { nodes: Record<string, FileSystemNode>; activeFileId:
   return { nodes: { [mainId]: mainFile }, activeFileId: mainId };
 }
 
-export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
-  ...seedWorkspace(),
+export const useWorkspaceStore = create<WorkspaceState>()(
+  persist(
+    (set, get) => ({
+      ...seedWorkspace(),
 
-  createFile: (parentId, name) => {
-    const id = makeId();
-    const language = detectLanguageFromFilename(name) ?? 'plaintext';
-    const template = getLanguageTemplate(language);
-    const node: FileSystemNode = {
-      id,
-      name,
-      type: 'file',
-      parentId,
-      language,
-      content: template,
-      codeByLanguage: { [language]: template },
-    };
-    set((state) => ({
-      nodes: { ...state.nodes, [id]: node },
-      activeFileId: id,
-    }));
-    return id;
-  },
+      createFile: (parentId, name) => {
+        const id = makeId();
+        const language = detectLanguageFromFilename(name) ?? 'plaintext';
+        const template = getLanguageTemplate(language);
+        const node: FileSystemNode = {
+          id,
+          name,
+          type: 'file',
+          parentId,
+          language,
+          content: template,
+          codeByLanguage: { [language]: template },
+        };
+        set((state) => ({
+          nodes: { ...state.nodes, [id]: node },
+          activeFileId: id,
+        }));
+        return id;
+      },
 
-  createFolder: (parentId, name) => {
-    const id = makeId();
-    const node: FileSystemNode = {
-      id,
-      name,
-      type: 'folder',
-      parentId,
-      expanded: true,
-    };
-    set((state) => ({ nodes: { ...state.nodes, [id]: node } }));
-    return id;
-  },
+      createFolder: (parentId, name) => {
+        const id = makeId();
+        const node: FileSystemNode = {
+          id,
+          name,
+          type: 'folder',
+          parentId,
+          expanded: true,
+        };
+        set((state) => ({ nodes: { ...state.nodes, [id]: node } }));
+        return id;
+      },
 
-  renameNode: (id, newName) => {
-    set((state) => {
-      const existing = state.nodes[id];
-      if (!existing) return state;
+      renameNode: (id, newName) => {
+        set((state) => {
+          const existing = state.nodes[id];
+          if (!existing) return state;
 
-      const updated: FileSystemNode = { ...existing, name: newName };
+          const updated: FileSystemNode = { ...existing, name: newName };
 
-      // Re-detect language from the new extension for files, same as a
-      // "New File" creation would — but only overwrite if something was
-      // actually detected, so renaming "main.py" to "main" (no
-      // extension) doesn't wipe a working language back to plaintext.
-      if (existing.type === 'file') {
-        const detected = detectLanguageFromFilename(newName);
-        if (detected) {
-          updated.language = detected;
+          // Re-detect language from the new extension for files, same as a
+          // "New File" creation would — but only overwrite if something was
+          // actually detected, so renaming "main.py" to "main" (no
+          // extension) doesn't wipe a working language back to plaintext.
+          if (existing.type === 'file') {
+            const detected = detectLanguageFromFilename(newName);
+            if (detected) {
+              updated.language = detected;
+            }
+          }
+
+          return { nodes: { ...state.nodes, [id]: updated } };
+        });
+      },
+
+      deleteNode: (id) => {
+        set((state) => {
+          const idsToDelete = new Set(collectIdsToDelete(state.nodes, id));
+          const nodes = { ...state.nodes };
+          idsToDelete.forEach((nodeId) => delete nodes[nodeId]);
+
+          const activeFileId = idsToDelete.has(state.activeFileId ?? '')
+            ? null
+            : state.activeFileId;
+
+          return { nodes, activeFileId };
+        });
+      },
+
+      openFile: (id) => {
+        const node = get().nodes[id];
+        if (node?.type === 'file') {
+          set({ activeFileId: id });
         }
-      }
+      },
 
-      return { nodes: { ...state.nodes, [id]: updated } };
-    });
-  },
+      toggleFolder: (id) => {
+        set((state) => {
+          const existing = state.nodes[id];
+          if (!existing || existing.type !== 'folder') return state;
+          return {
+            nodes: { ...state.nodes, [id]: { ...existing, expanded: !existing.expanded } },
+          };
+        });
+      },
 
-  deleteNode: (id) => {
-    set((state) => {
-      const idsToDelete = new Set(collectIdsToDelete(state.nodes, id));
-      const nodes = { ...state.nodes };
-      idsToDelete.forEach((nodeId) => delete nodes[nodeId]);
+      setActiveFileContent: (content) => {
+        set((state) => {
+          if (!state.activeFileId) return state;
+          const active = state.nodes[state.activeFileId];
+          if (!active || !active.language) return state;
+          // Save content to both convenience field and per-language storage
+          const codeByLanguage = { ...(active.codeByLanguage || {}), [active.language]: content };
+          return {
+            nodes: { ...state.nodes, [state.activeFileId]: { ...active, content, codeByLanguage } },
+          };
+        });
+      },
 
-      const activeFileId = idsToDelete.has(state.activeFileId ?? '')
-        ? null
-        : state.activeFileId;
+      setActiveFileLanguage: (language) => {
+        set((state) => {
+          if (!state.activeFileId) return state;
+          const active = state.nodes[state.activeFileId];
+          if (!active) return state;
+          // When language changes, restore previously saved code for that language, or show template if new
+          const codeByLanguage = active.codeByLanguage || {};
+          const newContent = codeByLanguage[language] ?? getLanguageTemplate(language);
+          // Update or initialize per-language storage if this is a new language
+          const updatedCodeByLanguage = { ...codeByLanguage, [language]: newContent };
+          return {
+            nodes: { ...state.nodes, [state.activeFileId]: { ...active, language, content: newContent, codeByLanguage: updatedCodeByLanguage } },
+          };
+        });
+      },
 
-      return { nodes, activeFileId };
-    });
-  },
-
-  openFile: (id) => {
-    const node = get().nodes[id];
-    if (node?.type === 'file') {
-      set({ activeFileId: id });
-    }
-  },
-
-  toggleFolder: (id) => {
-    set((state) => {
-      const existing = state.nodes[id];
-      if (!existing || existing.type !== 'folder') return state;
-      return {
-        nodes: { ...state.nodes, [id]: { ...existing, expanded: !existing.expanded } },
-      };
-    });
-  },
-
-  setActiveFileContent: (content) => {
-    set((state) => {
-      if (!state.activeFileId) return state;
-      const active = state.nodes[state.activeFileId];
-      if (!active || !active.language) return state;
-      // Save content to both convenience field and per-language storage
-      const codeByLanguage = { ...(active.codeByLanguage || {}), [active.language]: content };
-      return {
-        nodes: { ...state.nodes, [state.activeFileId]: { ...active, content, codeByLanguage } },
-      };
-    });
-  },
-
-  setActiveFileLanguage: (language) => {
-    set((state) => {
-      if (!state.activeFileId) return state;
-      const active = state.nodes[state.activeFileId];
-      if (!active) return state;
-      // When language changes, restore previously saved code for that language, or show template if new
-      const codeByLanguage = active.codeByLanguage || {};
-      const newContent = codeByLanguage[language] ?? getLanguageTemplate(language);
-      // Update or initialize per-language storage if this is a new language
-      const updatedCodeByLanguage = { ...codeByLanguage, [language]: newContent };
-      return {
-        nodes: { ...state.nodes, [state.activeFileId]: { ...active, language, content: newContent, codeByLanguage: updatedCodeByLanguage } },
-      };
-    });
-  },
-
-  clearActiveFileContent: () => {
-    set((state) => {
-      if (!state.activeFileId) return state;
-      const active = state.nodes[state.activeFileId];
-      if (!active) return state;
-      return {
-        nodes: { ...state.nodes, [state.activeFileId]: { ...active, content: '' } },
-      };
-    });
-  },
-}));
+      clearActiveFileContent: () => {
+        set((state) => {
+          if (!state.activeFileId) return state;
+          const active = state.nodes[state.activeFileId];
+          if (!active) return state;
+          // Also clear the per-language cache entry, or switching language
+          // away and back would silently restore the pre-clear code.
+          const codeByLanguage = active.language
+            ? { ...(active.codeByLanguage || {}), [active.language]: '' }
+            : active.codeByLanguage;
+          return {
+            nodes: { ...state.nodes, [state.activeFileId]: { ...active, content: '', codeByLanguage } },
+          };
+        });
+      },
+    }),
+    { name: 'glasshouse-workspace' },
+  ),
+);

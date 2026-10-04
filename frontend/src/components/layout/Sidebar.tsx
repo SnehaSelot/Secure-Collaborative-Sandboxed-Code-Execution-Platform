@@ -76,13 +76,13 @@ const ICONS = {
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/editor', label: 'Editor', icon: ICONS.editor },
-  { to: '/sessions', label: 'Sessions', icon: ICONS.sessions, badge: 'Coming Soon' },
-  {
+ {
     to: '/collaboration',
     label: 'Collaboration',
     icon: ICONS.collaboration,
     badge: 'Coming Soon',
   },
+    { to: '/sessions', label: 'Sessions', icon: ICONS.sessions, badge: 'Preview' },
   { to: '/risk', label: 'Risk Analysis', icon: ICONS.risk, badge: 'Preview' },
   { to: '/admin', label: 'Admin', icon: ICONS.admin, badge: 'Backend Required' },
 ];

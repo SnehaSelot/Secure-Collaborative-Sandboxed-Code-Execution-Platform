@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useCreateItemModalStore } from '../../state/createItemModalStore';
 import { useWorkspaceStore } from '../../state/workspaceStore';
+import { useToastStore } from '../../state/toastStore';
 
 /**
- * Replaces window.prompt for New File / New Folder only (per project
- * scope — Rename and Delete still use native prompt/confirm in
- * FileTreeItem.tsx). Rendered once, globally, by FileExplorer.tsx;
- * opened via useCreateItemModalStore from ExplorerToolbar.tsx (root)
- * and FileTreeItem.tsx (inside a folder).
+ * Replaces window.prompt for New File / New Folder. Rename now uses an
+ * inline editable input (FileTreeItem.tsx) and Delete uses ConfirmDialog.tsx
+ * — no native prompt/confirm/alert remain anywhere in the Explorer.
+ * Rendered once, globally, by FileExplorer.tsx; opened via
+ * useCreateItemModalStore from ExplorerToolbar.tsx (root) and
+ * FileTreeItem.tsx (inside a folder).
  */
 export function CreateItemModal() {
   const isOpen = useCreateItemModalStore((s) => s.isOpen);
@@ -18,6 +20,7 @@ export function CreateItemModal() {
   const nodes = useWorkspaceStore((s) => s.nodes);
   const createFile = useWorkspaceStore((s) => s.createFile);
   const createFolder = useWorkspaceStore((s) => s.createFolder);
+  const addToast = useToastStore((s) => s.addToast);
 
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +71,7 @@ export function CreateItemModal() {
     } else {
       createFolder(parentId, trimmed);
     }
+    addToast('success', `Created ${label} "${trimmed}".`);
     close();
   }
 

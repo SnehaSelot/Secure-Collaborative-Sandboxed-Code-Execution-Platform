@@ -1,17 +1,14 @@
-/**
- * Central environment configuration.
- *
- * Every other file that needs a backend URL imports from HERE, not from
- * `import.meta.env` directly. That way, when new backend services exist
- * (collab-gateway, auth, etc.) we add one new field in one place.
- */
-
 export const env = {
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000',
   /**
    * BACKEND INTEGRATION:
-   * Points at Arya's FastAPI execution service (main.py), which currently
-   * serves GET /health, GET /languages, GET /limits, POST /execute.
-   * Status: Available.
+   * Points at the /ws/execute streaming endpoint (see
+   * artifacts/WEBSOCKET_STREAMING.md). Derived from apiBaseUrl by
+   * swapping the scheme, so there's still only one URL to configure.
+   * Status: Available (backend), consumed by hooks/useStreamExecution.ts.
    */
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000',
+  wsBaseUrl: (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(
+    /^http/,
+    'ws',
+  ),
 } as const;
