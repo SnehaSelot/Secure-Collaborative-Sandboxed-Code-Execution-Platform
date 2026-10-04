@@ -41,9 +41,7 @@ def kill_container(client, holder: ContainerHolder) -> None:
             # then kill.  This is the most common cause of orphaned
             # containers on Docker Desktop (Windows/macOS Resource Saver
             # auto-pauses idle containers).
-            logger.warning(
-                "Container %s is paused — unpausing before kill", cid
-            )
+            logger.warning("Container %s is paused — unpausing before kill", cid)
             c.unpause()
         c.kill()
     except NotFound:
@@ -51,10 +49,7 @@ def kill_container(client, holder: ContainerHolder) -> None:
     except APIError as api_err:
         if (
             getattr(api_err, "status_code", None) == 409
-            or (
-                api_err.response is not None
-                and api_err.response.status_code == 409
-            )
+            or (api_err.response is not None and api_err.response.status_code == 409)
             or "is not running" in str(api_err).lower()
         ):
             logger.debug(
@@ -67,6 +62,4 @@ def kill_container(client, holder: ContainerHolder) -> None:
                 "kill() failed unexpectedly for container %s: %s", cid, api_err
             )
     except Exception as kill_exc:
-        logger.warning(
-            "kill() failed unexpectedly for container %s: %s", cid, kill_exc
-        )
+        logger.warning("kill() failed unexpectedly for container %s: %s", cid, kill_exc)

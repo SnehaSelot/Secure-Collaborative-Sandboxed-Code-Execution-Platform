@@ -105,7 +105,9 @@ async def ws_execute(websocket: WebSocket):
         return
 
     if not isinstance(stdin, str):
-        await websocket.send_json({"type": "error", "message": "stdin must be a string"})
+        await websocket.send_json(
+            {"type": "error", "message": "stdin must be a string"}
+        )
         await websocket.close()
         return
 
@@ -232,9 +234,7 @@ async def ws_execute(websocket: WebSocket):
                 # kill behind the stuck workers → kill never runs → deadlock.
                 await loop.run_in_executor(_cleanup_pool, _kill_container)
             except Exception:
-                logger.exception(
-                    "Unexpected error killing container on timeout"
-                )
+                logger.exception("Unexpected error killing container on timeout")
     else:
         # Worker finished before timeout — cancel the sleep task cleanly.
         timeout_task.cancel()
