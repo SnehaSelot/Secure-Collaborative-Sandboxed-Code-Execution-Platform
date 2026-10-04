@@ -120,6 +120,55 @@ export function EditorPage() {
     }
   };
 
+  // Resizable editor/terminal with layout toggle
+  const [layout, setLayout] = useState<'horizontal' | 'vertical'>('horizontal');
+  const [panelSize, setPanelSize] = useState(60); // percentage
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging || !containerRef.current) return;
+
+      const container = containerRef.current;
+      const rect = container.getBoundingClientRect();
+
+      let newSize: number;
+      if (layout === 'horizontal') {
+        // Resize vertically: update height
+        newSize = ((e.clientY - rect.top) / rect.height) * 100;
+      } else {
+        // Resize horizontally: update width
+        newSize = ((e.clientX - rect.left) / rect.width) * 100;
+      }
+
+      // Minimum 20% for each panel, 20% for other
+      if (newSize >= 20 && newSize <= 80) {
+        setPanelSize(newSize);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isDragging, layout]);
+
+  const handleRun = () => {
+    // Backend streaming support required for interactive stdin.
+    // For now, programs run without stdin. Support for live input will be added
+    // when the backend implements streaming execution (SSE/WebSocket).
+    run(activeFile?.content ?? '', activeFile?.language ?? 'plaintext');
+  };
+
   return (
     <div className="flex h-full gap-4 p-4">
       <FileExplorer />

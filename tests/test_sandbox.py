@@ -126,11 +126,14 @@ def _run(coro) -> Any:
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
-def http_execute(language: str, code: str) -> dict:
+def http_execute(language: str, code: str, stdin: str = "") -> dict:
     """POST /execute and return parsed JSON body."""
+    payload: dict[str, Any] = {"language": language, "code": code}
+    if stdin:
+        payload["stdin"] = stdin
     r = requests.post(
         f"{BASE_HTTP}/execute",
-        json={"language": language, "code": code},
+        json=payload,
         timeout=HTTP_TIMEOUT,
     )
     r.raise_for_status()
@@ -141,6 +144,7 @@ async def ws_execute_async(
     language: str,
     code: str,
     *,
+    stdin: str = "",
     disconnect_after: float | None = None,
 ) -> tuple[list[dict], float]:
     """
@@ -160,8 +164,12 @@ async def ws_execute_async(
     messages: list[dict] = []
     t0 = time.monotonic()
 
+    payload: dict[str, Any] = {"language": language, "code": code}
+    if stdin:
+        payload["stdin"] = stdin
+
     async with websockets.connect(BASE_WS, open_timeout=10) as ws:
-        await ws.send(json.dumps({"language": language, "code": code}))
+        await ws.send(json.dumps(payload))
 
         while True:
             if (
@@ -686,7 +694,13 @@ class TestWebSocketDisconnect:
     """TEST-31 through TEST-33."""
 
     def test_31_disconnect_during_execution(self):
-        """TEST-31: Client disconnects mid-execution -- no orphan container."""
+        """TEST-31: Client disconnects mid-execution -- container killed immediately, no orphan.
+
+        With the disconnect-kill fix, the server kills the container as soon
+        as WebSocketDisconnect fires in _drain().  We only need a short pause
+        for the Docker remove() to settle; waiting the full timeout is no
+        longer necessary.
+        """
 
         async def run():
             async with websockets.connect(BASE_WS, open_timeout=10) as ws:
@@ -708,12 +722,17 @@ class TestWebSocketDisconnect:
                 # WebSocket context exits here -> close frame sent
 
         _run(run())
-        # Wait for container timeout + cleanup
-        time.sleep(_PYTHON_TIMEOUT + 2)
+        # The disconnect-kill path triggers immediately; 3 s is enough for
+        # the container kill + remove to complete.
+        time.sleep(3)
         assert_no_orphan_containers()
 
     def test_32_disconnect_during_output_flood(self):
-        """TEST-32: Disconnect during high-output execution -- no crash, no orphan."""
+        """TEST-32: Disconnect during high-output execution -- container killed, no orphan.
+
+        The disconnect-kill path fires immediately when WebSocketDisconnect is
+        raised in _drain() during the output-flood scenario.
+        """
 
         async def run():
             async with websockets.connect(BASE_WS, open_timeout=10) as ws:
@@ -733,7 +752,8 @@ class TestWebSocketDisconnect:
                 # disconnect
 
         _run(run())
-        time.sleep(_PYTHON_TIMEOUT + 2)
+        # Short wait: kill fires on disconnect, not after the full timeout.
+        time.sleep(3)
         assert_no_orphan_containers()
 
     def test_33_disconnect_near_timeout(self):

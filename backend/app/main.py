@@ -1,6 +1,6 @@
 """
 
-    POST /execute   { "language": "python", "code": "print(1+1)" }
+    POST /execute   { "language": "python", "code": "print(1+1)", "stdin": "" }
                      -> { stdout, stderr, exit_code, status, execution_time }
 
 Run locally:
@@ -145,6 +145,7 @@ async def _stop_reaper() -> None:
 class ExecuteRequest(BaseModel):
     language: str = Field(..., description=f"One of: {', '.join(LANGUAGE_IMAGES)}")
     code: str = Field(..., description="Source code to run")
+    stdin: str = Field(default="", description="Optional standard input to feed to the program")
 
 
 class ExecuteResponse(BaseModel):
@@ -210,7 +211,7 @@ async def execute(req: ExecuteRequest):
     try:
         result = await loop.run_in_executor(
             _executor_pool,
-            functools.partial(run_code, client, req.language, req.code),
+            functools.partial(run_code, client, req.language, req.code, req.stdin),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -225,6 +226,9 @@ async def execute(req: ExecuteRequest):
 #
 # Delivers stdout/stderr incrementally as the container runs, then sends a
 # final "result" message.  The existing /execute HTTP endpoint is untouched.
+#
+# Message protocol (client → server, initial message):
+#   {"language": "python", "code": "...", "stdin": "optional input\n"}
 #
 # Message protocol (server → client):
 #   {"type": "stdout",          "data": "..."}
@@ -259,7 +263,7 @@ async def ws_execute(websocket: WebSocket):
     Flow
     ----
     1. Accept the connection and validate the Origin header.
-    2. Receive ``{"language": ..., "code": ...}`` from the client.
+    2. Receive ``{"language": ..., "code": ..., "stdin": "..."}`` from the client.
     3. Validate input (same rules as POST /execute).
     4. Create a bounded asyncio.Queue and a ContainerHolder.
     5. Submit stream_run_code() to _executor_pool via run_in_executor.
@@ -289,6 +293,7 @@ async def ws_execute(websocket: WebSocket):
 
     language = data.get("language", "")
     code = data.get("code", "")
+    stdin = data.get("stdin", "")
 
     # --- 3. Validate input ---------------------------------------------------
     if language not in LANGUAGE_IMAGES:
@@ -333,13 +338,72 @@ async def ws_execute(websocket: WebSocket):
     def worker() -> tuple:
         """Wrapper that calls stream_run_code and posts _WORKER_DONE sentinel."""
         try:
-            return stream_run_code(client, language, code, emit, holder)
+            return stream_run_code(client, language, code, emit, holder, stdin)
         finally:
             # Signal the async consumer that no more items are coming.
             loop.call_soon_threadsafe(queue.put_nowait, _WORKER_DONE)
 
     # --- 5. Submit worker to thread pool -------------------------------------
     worker_future = loop.run_in_executor(_executor_pool, worker)
+
+    # --- Shared kill helper --------------------------------------------------
+    # Used by BOTH the timeout path (step 7) and the disconnect path (_drain).
+    # Must always run in _cleanup_pool (never _executor_pool) so the kill can
+    # never be starved by a pool saturated with stuck workers.
+    def _kill_container() -> None:
+        """Close the attach stream and kill the sandbox container.
+
+        Step 1 — close the attach stream: immediately unblocks the streaming
+        worker thread (the blocking socket read raises) without waiting for a
+        container-level signal.
+
+        Step 2 — kill the container so Docker closes the connection on its
+        side too and the container stops consuming resources.
+        """
+        holder.close_stream()
+
+        cid = holder.get()
+        if cid is None:
+            return  # container never started (validation error path)
+
+        try:
+            c = client.containers.get(cid)
+            c.reload()
+            if c.status == "paused":
+                # Docker refuses to kill a paused container — the cgroup is
+                # frozen so the signal has nowhere to land.  Unpause first,
+                # then kill.  This is the most common cause of orphaned
+                # containers on Docker Desktop (Windows/macOS Resource Saver
+                # auto-pauses idle containers).
+                logger.warning(
+                    "Container %s is paused — unpausing before kill", cid
+                )
+                c.unpause()
+            c.kill()
+        except NotFound:
+            logger.debug("Container %s already gone (natural exit race)", cid)
+        except APIError as api_err:
+            if (
+                getattr(api_err, "status_code", None) == 409
+                or (
+                    api_err.response is not None
+                    and api_err.response.status_code == 409
+                )
+                or "is not running" in str(api_err).lower()
+            ):
+                logger.debug(
+                    "Container %s already stopped (natural exit race): %s",
+                    cid,
+                    api_err,
+                )
+            else:
+                logger.warning(
+                    "kill() failed unexpectedly for container %s: %s", cid, api_err
+                )
+        except Exception as kill_exc:
+            logger.warning(
+                "kill() failed unexpectedly for container %s: %s", cid, kill_exc
+            )
 
     # --- 6. Drain task — runs CONCURRENTLY with the worker ------------------
     # This is the critical fix: the queue consumer must be live while the
@@ -351,8 +415,17 @@ async def ws_execute(websocket: WebSocket):
     #
     # By launching drain_task here, each queue.get() fires a send_json()
     # immediately as emit() posts chunks, giving true incremental delivery.
+    #
+    # Disconnect kill: when the client disconnects mid-run we trigger the
+    # same _kill_container() path the timeout uses.  The kill runs on
+    # _cleanup_pool so it can never be starved by _executor_pool.  After
+    # triggering the kill we keep draining so the _WORKER_DONE sentinel is
+    # consumed and the worker thread is not leaked.
+    disconnect_requested = False
+
     async def _drain():
         """Forward queue messages to the WebSocket until _WORKER_DONE arrives."""
+        nonlocal disconnect_requested
         try:
             while True:
                 msg = await queue.get()
@@ -360,7 +433,27 @@ async def ws_execute(websocket: WebSocket):
                     return
                 await websocket.send_json(msg)
         except WebSocketDisconnect:
-            logger.info("WebSocket client disconnected during output drain")
+            disconnect_requested = True
+            logger.info(
+                "WebSocket client disconnected during output drain — killing container"
+            )
+            cid = holder.get()
+            if cid is not None:
+                try:
+                    await loop.run_in_executor(_cleanup_pool, _kill_container)
+                except Exception:
+                    logger.exception(
+                        "Unexpected error killing container %s on disconnect", cid
+                    )
+            # Keep draining so _WORKER_DONE is consumed and the thread is freed.
+            try:
+                while True:
+                    msg = await queue.get()
+                    if msg is _WORKER_DONE:
+                        return
+                    # discard — client is gone
+            except Exception:
+                pass
         except Exception:
             logger.exception("Error draining output queue")
 
@@ -380,80 +473,18 @@ async def ws_execute(websocket: WebSocket):
     if timeout_task in done:
         # Timeout fired — worker may still be running the Docker stream.
         timeout_requested = True
-        container_id = holder.get()
-        if container_id is not None:
+        if holder.get() is not None:
             try:
-                # Run the blocking kill() in the thread pool so we don't block
-                # the event loop.
-                def _kill():
-                    # Step 1 — close the attach stream to immediately unblock
-                    # the streaming worker thread.  The blocking socket read
-                    # inside the docker-py generator will raise and the worker
-                    # will exit the stream loop, freeing the thread before the
-                    # Docker kill signal has even been sent.
-                    holder.close_stream()
-
-                    # Step 2 — kill the container so it stops and Docker
-                    # closes the connection on the daemon side too.
-                    try:
-                        c = client.containers.get(container_id)
-                        c.reload()
-                        if c.status == "paused":
-                            # Docker refuses to kill a paused container — the
-                            # cgroup is frozen so the signal has nowhere to land.
-                            # Unpause first, then kill.  This is the most common
-                            # cause of orphaned containers on Docker Desktop
-                            # (Windows/macOS Resource Saver auto-pauses idle
-                            # containers).
-                            logger.warning(
-                                "Container %s is paused — unpausing before kill",
-                                container_id,
-                            )
-                            c.unpause()
-                        c.kill()
-                    except NotFound:
-                        # 404 → container exited naturally just before we got
-                        # here; this is a benign race.
-                        logger.debug(
-                            "Container %s already gone (natural exit race)",
-                            container_id,
-                        )
-                    except APIError as api_err:
-                        if (
-                            getattr(api_err, "status_code", None) == 409
-                            or (
-                                api_err.response is not None
-                                and api_err.response.status_code == 409
-                            )
-                            or "is not running" in str(api_err).lower()
-                        ):
-                            logger.debug(
-                                "Container %s already stopped (natural exit race): %s",
-                                container_id,
-                                api_err,
-                            )
-                        else:
-                            logger.warning(
-                                "kill() failed unexpectedly for container %s: %s",
-                                container_id,
-                                api_err,
-                            )
-                    except Exception as kill_exc:
-                        # Anything else is a real failure — log loudly so it isn't silently dropped.
-                        logger.warning(
-                            "kill() failed unexpectedly for container %s: %s",
-                            container_id,
-                            kill_exc,
-                        )
-
                 # Use _cleanup_pool, NOT _executor_pool.  This is the
-                # critical safety property: _kill() must always have a free
-                # thread even if _executor_pool is fully saturated with stuck
-                # workers.  Submitting to _executor_pool would queue _kill()
-                # behind the stuck workers → kill never runs → self-deadlock.
-                await loop.run_in_executor(_cleanup_pool, _kill)
+                # critical safety property: _kill_container() must always have
+                # a free thread even if _executor_pool is fully saturated with
+                # stuck workers.  Submitting to _executor_pool would queue the
+                # kill behind the stuck workers → kill never runs → deadlock.
+                await loop.run_in_executor(_cleanup_pool, _kill_container)
             except Exception:
-                logger.exception("Unexpected error killing container %s", container_id)
+                logger.exception(
+                    "Unexpected error killing container on timeout"
+                )
     else:
         # Worker finished before timeout — cancel the sleep task cleanly.
         timeout_task.cancel()
@@ -481,6 +512,12 @@ async def ws_execute(websocket: WebSocket):
         logger.exception("Drain task raised unexpectedly")
 
     # --- 8. Send final result message ----------------------------------------
+    # Skip if the client already disconnected — the socket is gone and the
+    # send would raise WebSocketDisconnect anyway.  The container has already
+    # been killed by _drain() in that path.
+    if disconnect_requested:
+        return
+
     exit_code, status, execution_time = worker_result
     if timeout_requested:
         status = "timeout"
@@ -497,3 +534,4 @@ async def ws_execute(websocket: WebSocket):
         await websocket.close()
     except WebSocketDisconnect:
         pass  # Client already gone — nothing to do
+
