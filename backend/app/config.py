@@ -36,7 +36,7 @@ CLEANUP_POOL_MAX_WORKERS: int = 4
 # Orphan reaper settings
 # ---------------------------------------------------------------------------
 
-_REAP_INTERVAL: int = 30   # seconds between sweeps
+_REAP_INTERVAL: int = 30  # seconds between sweeps
 _MAX_CONTAINER_AGE: int = 120  # 2× the longest per-language timeout (Go/Rust = 60 s)
 
 # ---------------------------------------------------------------------------

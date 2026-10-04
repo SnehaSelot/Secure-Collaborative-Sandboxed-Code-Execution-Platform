@@ -36,6 +36,7 @@ router = APIRouter()
 # Request / Response models
 # ---------------------------------------------------------------------------
 
+
 class ExecuteRequest(BaseModel):
     language: str = Field(..., description=f"One of: {', '.join(LANGUAGE_IMAGES)}")
     code: str = Field(..., description="Source code to run")
@@ -57,6 +58,7 @@ class ExecuteResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @router.get("/health")
 async def health():
