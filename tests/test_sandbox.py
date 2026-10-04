@@ -51,6 +51,7 @@ _DEFAULT_TIMEOUT = 15  # fallback for languages not in the dict above
 # Convenience alias used by tests that only run Python code.
 _PYTHON_TIMEOUT = TIMEOUT_SECONDS["python"]
 MAX_OUTPUT_CHARS = 20_000  # executor.MAX_OUTPUT_CHARS
+MAX_STDIN_CHARS = 65_536  # executor.MAX_STDIN_CHARS
 EXEC_UID = "1000"  # numeric part of executor.EXEC_UID ("1000:1000")
 HTTP_TIMEOUT = 60  # generous HTTP timeout for first-run image pulls
 # Safety margin added on top of the executor timeout for the ws.recv() guard.
@@ -1193,6 +1194,45 @@ class TestInputValidation:
             assert (
                 health.status_code == 200
             ), f"Server appears down after malformed payload: {payload!r}"
+
+    def test_stdin_too_long_http_422(self):
+        """HTTP: stdin exceeding MAX_STDIN_CHARS characters returns 422."""
+        oversized_stdin = "x" * (MAX_STDIN_CHARS + 1)
+        r = requests.post(
+            f"{BASE_HTTP}/execute",
+            json={"language": "python", "code": "print(1)", "stdin": oversized_stdin},
+            timeout=10,
+        )
+        assert r.status_code == 422, (
+            f"Expected 422 for oversized stdin, got {r.status_code}"
+        )
+
+    def test_stdin_too_long_ws_error(self):
+        """WebSocket: stdin exceeding MAX_STDIN_CHARS characters returns an error message."""
+        oversized_stdin = "x" * (MAX_STDIN_CHARS + 1)
+
+        async def check():
+            async with websockets.connect(BASE_WS, open_timeout=10) as ws:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "language": "python",
+                            "code": "print(1)",
+                            "stdin": oversized_stdin,
+                        }
+                    )
+                )
+                raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                return json.loads(raw)
+
+        msg = _run(check())
+        assert msg["type"] == "error", (
+            f"Expected error message for oversized stdin, got type={msg['type']!r}"
+        )
+        assert str(MAX_STDIN_CHARS) in msg.get("message", ""), (
+            f"Error message does not mention the limit: {msg.get('message')!r}"
+        )
+        assert_no_orphan_containers()
 
 
 # ---------------------------------------------------------------------------

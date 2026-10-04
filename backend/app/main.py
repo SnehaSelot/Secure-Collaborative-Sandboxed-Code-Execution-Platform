@@ -30,6 +30,7 @@ from app.services.executor import (
     TIMEOUT_SECONDS,
     _DEFAULT_TIMEOUT,
     MAX_OUTPUT_CHARS,
+    MAX_STDIN_CHARS,
     run_code,
     stream_run_code,
     ContainerHolder,
@@ -145,7 +146,7 @@ async def _stop_reaper() -> None:
 class ExecuteRequest(BaseModel):
     language: str = Field(..., description=f"One of: {', '.join(LANGUAGE_IMAGES)}")
     code: str = Field(..., description="Source code to run")
-    stdin: str = Field(default="", description="Optional standard input to feed to the program")
+    stdin: str = Field(default="", max_length=MAX_STDIN_CHARS, description="Optional standard input to feed to the program")
 
 
 class ExecuteResponse(BaseModel):
@@ -192,6 +193,7 @@ async def limits():
         "max_open_files": 2048,
         "max_file_size_bytes": 10_000_000,
         "max_output_chars": MAX_OUTPUT_CHARS,
+        "max_stdin_chars": MAX_STDIN_CHARS,
     }
 
 
@@ -311,6 +313,18 @@ async def ws_execute(websocket: WebSocket):
 
     if not code.strip():
         await websocket.send_json({"type": "error", "message": "Code cannot be empty"})
+        await websocket.close()
+        return
+
+    if not isinstance(stdin, str):
+        await websocket.send_json({"type": "error", "message": "stdin must be a string"})
+        await websocket.close()
+        return
+
+    if len(stdin) > MAX_STDIN_CHARS:
+        await websocket.send_json(
+            {"type": "error", "message": f"stdin exceeds {MAX_STDIN_CHARS} characters"}
+        )
         await websocket.close()
         return
 

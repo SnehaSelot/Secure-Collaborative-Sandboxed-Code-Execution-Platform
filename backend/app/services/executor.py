@@ -97,6 +97,7 @@ EXTRA_ENV: dict[str, list[str]] = {
 CODE_MOUNT_DIR = "/code"
 
 MAX_OUTPUT_CHARS = 20_000
+MAX_STDIN_CHARS = 65_536
 EXEC_UID = "1000:1000"
 
 # Container-side path for the shared code workspace, bind-mounted from the
@@ -235,7 +236,7 @@ def run_code(
             stdin_socket = None
             if stdin:
                 stdin_socket = client.api.attach_socket(
-                    container.id, params={"stdin": 1, "stream": 1}
+                    container.id, params={"stdin": 1, "stream": 1} #type: ignore
                 )
 
             container.start()
