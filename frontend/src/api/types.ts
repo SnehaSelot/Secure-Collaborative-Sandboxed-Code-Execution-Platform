@@ -22,7 +22,6 @@ export interface LimitsResponse {
   max_open_files: number;
   max_file_size_bytes: number;
   max_output_chars: number;
-  max_stdin_chars?: number;
 }
 
 /** BACKEND INTEGRATION: POST /execute request shape. Status: Available. */
@@ -58,62 +57,3 @@ export interface ApiErrorDetailItem {
 export interface ApiErrorResponse {
   detail: string | ApiErrorDetailItem[];
 }
-
-// ---------------------------------------------------------------------------
-// WebSocket /ws/execute — server → client message types
-// ---------------------------------------------------------------------------
-
-/** Initial message shape sent by the client to /ws/execute. */
-export interface WsExecuteRequest {
-  language: string;
-  code: string;
-  stdin?: string;
-}
-
-/** A chunk of stdout from the running container. */
-export interface WsStdoutMessage {
-  type: 'stdout';
-  data: string;
-}
-
-/** A chunk of stderr from the running container. */
-export interface WsStderrMessage {
-  type: 'stderr';
-  data: string;
-}
-
-/** Emitted once when the stdout output limit is reached. */
-export interface WsStdoutTruncatedMessage {
-  type: 'stdout_truncated';
-}
-
-/** Emitted once when the stderr output limit is reached. */
-export interface WsStderrTruncatedMessage {
-  type: 'stderr_truncated';
-}
-
-/** Validation or setup error (sent before the container starts). */
-export interface WsErrorMessage {
-  type: 'error';
-  message: string;
-}
-
-/**
- * Final message — always the last one sent on a connection.
- * status is overridden to 'timeout' by the server when a kill was issued.
- */
-export interface WsResultMessage {
-  type: 'result';
-  exit_code: number | null;
-  status: ExecutionStatus;
-  execution_time: number;
-}
-
-/** Discriminated union of every message the server can send over /ws/execute. */
-export type WsServerMessage =
-  | WsStdoutMessage
-  | WsStderrMessage
-  | WsStdoutTruncatedMessage
-  | WsStderrTruncatedMessage
-  | WsErrorMessage
-  | WsResultMessage;
