@@ -5,6 +5,7 @@ import { acquireFileDocument, type FileDocumentLease } from '../../state/fileDoc
 import { usePreferencesStore } from '../../state/preferencesStore';
 import { useToastStore } from '../../state/toastStore';
 import type { ProviderSnapshot } from '../../collaboration/provider';
+import { getEditorDisplayOptions, getResolvedTheme } from './editorOptions';
 
 interface CodeEditorProps {
   fileId: string;
@@ -19,8 +20,14 @@ interface CodeEditorProps {
 export function CodeEditor({ fileId, language, onProviderStatus }: CodeEditorProps) {
   const themePreference = usePreferencesStore((state) => state.theme);
   const fontSize = usePreferencesStore((state) => state.fontSize);
+  const fontFamily = usePreferencesStore((state) => state.fontFamily);
   const wordWrap = usePreferencesStore((state) => state.wordWrap);
   const tabSize = usePreferencesStore((state) => state.tabSize);
+  const minimap = usePreferencesStore((state) => state.minimap);
+  const lineNumbers = usePreferencesStore((state) => state.lineNumbers);
+  const showCollaboratorCursors = usePreferencesStore(
+    (state) => state.showCollaboratorCursors,
+  );
   const [editorTheme, setEditorTheme] = useState<'light' | 'vs-dark'>('vs-dark');
   const [lease, setLease] = useState<FileDocumentLease | null>(null);
 
@@ -56,9 +63,7 @@ export function CodeEditor({ fileId, language, onProviderStatus }: CodeEditorPro
     const media = window.matchMedia('(prefers-color-scheme: light)');
     const applyTheme = () => {
       setEditorTheme(
-        themePreference === 'light' || (themePreference === 'system' && media.matches)
-          ? 'light'
-          : 'vs-dark',
+        getResolvedTheme(themePreference, media.matches) === 'light' ? 'light' : 'vs-dark',
       );
     };
 
@@ -81,25 +86,29 @@ export function CodeEditor({ fileId, language, onProviderStatus }: CodeEditorPro
           onMount={(instance) => {
             const model = instance.getModel();
             if (model) {
+              const awareness = showCollaboratorCursors
+                ? activeLease.provider.getSnapshot().awareness
+                : null;
               new MonacoBinding(
                 activeLease.text,
                 model,
                 new Set([instance]),
-                activeLease.provider.getSnapshot().awareness ?? undefined,
+                awareness ?? undefined,
               );
             }
           }}
           options={{
-            minimap: { enabled: false },
-            fontSize,
-            wordWrap,
-            tabSize,
-            insertSpaces: true,
-            lineNumbers: 'on',
+            ...getEditorDisplayOptions({
+              fontSize,
+              fontFamily,
+              wordWrap,
+              tabSize,
+              minimap,
+              lineNumbers,
+            }),
             automaticLayout: true,
             scrollBeyondLastLine: false,
             padding: { top: 12 },
-            fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, monospace",
             // Explicit, not just relying on the default: without these,
             // a stale Monaco model from a previous mount can occasionally
             // come back read-only after a fast file/language switch.

@@ -5,17 +5,19 @@ import { Sidebar } from '../components/layout/Sidebar';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { ToastContainer } from '../components/ui/Toast';
 import { usePreferencesStore } from '../state/preferencesStore';
+import { getResolvedTheme } from '../features/editor/editorOptions';
 
 export function MainLayout() {
   const theme = usePreferencesStore((state) => state.theme);
+  const interfaceDensity = usePreferencesStore((state) => state.interfaceDensity);
+  const reducedMotion = usePreferencesStore((state) => state.reducedMotion);
 
   useEffect(() => {
     const root = document.documentElement;
     const media = window.matchMedia('(prefers-color-scheme: light)');
 
     const applyTheme = () => {
-      const resolvedTheme =
-        theme === 'system' ? (media.matches ? 'light' : 'dark') : theme;
+      const resolvedTheme = getResolvedTheme(theme, media.matches);
       root.dataset.theme = resolvedTheme;
       root.style.colorScheme = resolvedTheme;
     };
@@ -24,6 +26,12 @@ export function MainLayout() {
     media.addEventListener('change', applyTheme);
     return () => media.removeEventListener('change', applyTheme);
   }, [theme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.density = interfaceDensity;
+    root.dataset.reducedMotion = String(reducedMotion);
+  }, [interfaceDensity, reducedMotion]);
 
   return (
     <div className="flex h-screen flex-col bg-neutral-950 text-neutral-100">

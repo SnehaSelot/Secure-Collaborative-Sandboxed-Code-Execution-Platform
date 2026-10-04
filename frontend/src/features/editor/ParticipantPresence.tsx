@@ -4,9 +4,13 @@ import { getParticipants, type Participant } from '../../collaboration/presence'
 
 interface ParticipantPresenceProps {
   awareness: Awareness | null;
+  showNames?: boolean;
 }
 
-export function ParticipantPresence({ awareness }: ParticipantPresenceProps) {
+export function ParticipantPresence({
+  awareness,
+  showNames = true,
+}: ParticipantPresenceProps) {
   const [participantSnapshot, setParticipantSnapshot] = useState<{
     awareness: Awareness;
     participants: Participant[];
@@ -56,14 +60,19 @@ export function ParticipantPresence({ awareness }: ParticipantPresenceProps) {
           key={participant.clientId}
           className="flex items-center gap-1 rounded-full border border-white/10 bg-neutral-900/70 px-2 py-0.5 text-[10px] text-neutral-300"
           title={participant.isLocal ? `${participant.displayName} (you)` : participant.displayName}
+          aria-label={participant.isLocal ? `${participant.displayName} (you)` : participant.displayName}
         >
           <span
             className="h-1.5 w-1.5 rounded-full"
             style={{ backgroundColor: participant.color }}
             aria-hidden="true"
           />
-          <span>{participant.displayName}</span>
-          {participant.isLocal && <span className="text-neutral-500">(you)</span>}
+          {showNames && (
+            <>
+              <span>{participant.displayName}</span>
+              {participant.isLocal && <span className="text-neutral-500">(you)</span>}
+            </>
+          )}
         </li>
       ))}
     </ul>

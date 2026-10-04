@@ -11,6 +11,7 @@ import { getFileDocumentContent } from '../state/fileDocumentRegistry';
 import { formatCode, isFormattable } from '../utils/formatCode';
 import { useStreamExecution } from '../hooks/useStreamExecution';
 import type { ProviderSnapshot } from '../collaboration/provider';
+import { usePreferencesStore } from '../state/preferencesStore';
 
 interface FileProviderStatus {
   fileId: string;
@@ -49,6 +50,8 @@ export function EditorPage() {
   const setActiveFileContent = useWorkspaceStore((s) => s.setActiveFileContent);
   const setActiveFileLanguage = useWorkspaceStore((s) => s.setActiveFileLanguage);
   const clearActiveFileContent = useWorkspaceStore((s) => s.clearActiveFileContent);
+  const clearOutputBeforeRun = usePreferencesStore((s) => s.clearOutputBeforeRun);
+  const showParticipantNames = usePreferencesStore((s) => s.showParticipantNames);
 
   const activeFile = activeFileId ? nodes[activeFileId] : undefined;
   const [providerStatus, setProviderStatus] = useState<FileProviderStatus | null>(null);
@@ -114,7 +117,7 @@ export function EditorPage() {
 
     const code = getFileDocumentContent(currentFileId) ?? currentFile.content ?? '';
     const currentStdin = useExecutionStore.getState().stdin;
-    run(code, currentFile.language ?? 'plaintext', currentStdin);
+    run(code, currentFile.language ?? 'plaintext', currentStdin, !clearOutputBeforeRun);
   };
 
   /**
@@ -157,7 +160,10 @@ export function EditorPage() {
                   >
                     {PROVIDER_STATUS_LABELS[activeProviderSnapshot.status]}
                   </span>
-                  <ParticipantPresence awareness={activeProviderSnapshot.awareness} />
+                  <ParticipantPresence
+                    awareness={activeProviderSnapshot.awareness}
+                    showNames={showParticipantNames}
+                  />
                 </>
               )}
 

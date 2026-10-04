@@ -26,14 +26,14 @@ export function useStreamExecution() {
   const cancelRef = useRef<(() => void) | null>(null);
 
   const run = useCallback(
-    (code: string, language: string, stdin = '') => {
+    (code: string, language: string, stdin = '', retainOutput = false) => {
       if (!code.trim()) {
         setError('Code cannot be empty.');
         return;
       }
 
       cancelRef.current?.();
-      startExecution(code, language);
+      startExecution(code, language, retainOutput);
 
       cancelRef.current = streamExecute(language, code, stdin, {
         onStdout: (chunk) => addTerminalLine('output', chunk),

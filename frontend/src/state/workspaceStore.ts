@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { getLanguageTemplate, detectLanguageFromFilename } from '../config/languageTemplates';
 import { DEFAULT_LANGUAGE } from '../config/constants';
+import { usePreferencesStore } from './preferencesStore';
 
 export type NodeType = 'file' | 'folder';
 
@@ -94,7 +95,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       createFile: (parentId, name) => {
         const id = makeId();
-        const language = detectLanguageFromFilename(name) ?? 'plaintext';
+        const language =
+          detectLanguageFromFilename(name) ??
+          usePreferencesStore.getState().defaultLanguage;
         const template = getLanguageTemplate(language);
         const node: FileSystemNode = {
           id,
