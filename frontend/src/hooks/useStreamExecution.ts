@@ -9,6 +9,10 @@ import { useExecutionStore } from '../state/executionStore';
  *
  * This is the Run action used by EditorPage.tsx. useExecuteCode.ts
  * (POST /execute) is kept around unused as a fallback.
+ *
+ * stdin is read from executionStore (filled in by the Terminal's stdin
+ * field — see OutputPanel.tsx) and sent once, upfront. See the TODO in
+ * api/streamExecution.ts for what live/mid-run stdin would need.
  */
 export function useStreamExecution() {
   const startExecution = useExecutionStore((s) => s.startExecution);
@@ -21,7 +25,7 @@ export function useStreamExecution() {
   const cancelRef = useRef<(() => void) | null>(null);
 
   const run = useCallback(
-    (code: string, language: string) => {
+    (code: string, language: string, stdin = '') => {
       if (!code.trim()) {
         setError('Code cannot be empty.');
         return;
@@ -30,7 +34,7 @@ export function useStreamExecution() {
       cancelRef.current?.();
       startExecution(code, language);
 
-      cancelRef.current = streamExecute(language, code, {
+      cancelRef.current = streamExecute(language, code, stdin, {
         onStdout: (chunk) => addTerminalLine('output', chunk),
         onStderr: (chunk) => addTerminalLine('error', chunk),
         onStdoutTruncated: () => setTruncated('stdout'),
