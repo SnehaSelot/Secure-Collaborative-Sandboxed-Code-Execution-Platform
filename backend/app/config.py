@@ -47,3 +47,21 @@ _MAX_CONTAINER_AGE: int = 120  # 2× the longest per-language timeout (Go/Rust =
 # async WebSocket sender.  128 slots provide backpressure without consuming
 # significant memory; each slot holds one small JSON-serialisable dict.
 _WS_QUEUE_MAXSIZE: int = 128
+
+# ---------------------------------------------------------------------------
+# Collaboration (Yjs) WebSocket settings
+# ---------------------------------------------------------------------------
+
+# Largest single binary frame accepted from a collaboration client.
+COLLAB_MAX_MESSAGE_BYTES: int = 1_048_576  # 1 MiB
+
+# Maximum simultaneous connections per collaboration room.
+COLLAB_MAX_ROOM_CLIENTS: int = 20
+
+# How long an empty room stays in memory (so quick reconnects are free) before
+# its Y.Doc is persisted via the state store and evicted.
+COLLAB_ROOM_IDLE_SECONDS: float = 60.0
+
+# Per-client outbound queue.  A client that falls this far behind is dropped
+# (it resyncs from the Y.Doc on reconnect) instead of growing memory forever.
+COLLAB_CLIENT_QUEUE_MAXSIZE: int = 256
