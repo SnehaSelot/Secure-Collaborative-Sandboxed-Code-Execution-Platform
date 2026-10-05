@@ -33,6 +33,7 @@ services:
       - "5432:5432" # lets you connect a DB client from your host too
     volumes:
       - pgdata:/var/lib/postgresql/data # persists data across container restarts
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
 
 volumes:
   pgdata:

@@ -3,37 +3,23 @@ app/routers/ws_collab.py — Yjs collaboration WebSocket endpoint.
 
     ws://host/ws/collab/{room_id}
 
+    room_id = "{session_id}:{file_id}"   (both UUIDs, colon-separated)
+
 Speaks the standard y-websocket wire protocol, so the frontend can use the
 stock client with no custom code:
 
     import { WebsocketProvider } from "y-websocket";
     const provider = new WebsocketProvider(
-        "ws://localhost:8000/ws/collab", roomId, ydoc
+        "ws://localhost:8000/ws/collab",
+        `${sessionId}:${fileId}`,
+        ydoc,
+        { params: { token: accessToken } }
     );
 
 (y-websocket appends "/<roomId>" to the base URL.)
-
-What the server does
---------------------
-* Keeps one authoritative server-side Y.Doc (pycrdt) per room.  Because the
-  server holds the full state, late joiners sync even when nobody else is
-  online, and the doc can be persisted (-> Files.yjs_state) without needing a
-  browser to be connected.
-* Sync protocol: on connect the server sends SYNC_STEP1; it answers the
-  client's SYNC_STEP1 with SYNC_STEP2; every update it receives is applied to
-  the room doc and fanned out to the other clients in the room.
-* Awareness (cursors / presence): relayed, cached per room so newcomers see
-  existing users immediately, and cleared when a connection drops so ghost
-  cursors don't linger.
-* Persistence: through the small YStateStore interface below.  When the last
-  client leaves, the room stays warm for COLLAB_ROOM_IDLE_SECONDS, is saved,
-  then evicted.  Swap InMemoryStateStore for a Postgres-backed store later.
-
-Everything here runs on the event loop (no threads, no Docker), so it cannot
-interact with _executor_pool / _cleanup_pool used by the execution routes.
-
-Requires:  pip install pycrdt
 """
+
+from __future__ import annotations
 
 import asyncio
 import json
@@ -42,9 +28,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter, HTTPException, WebSocket
 from pycrdt import (
     Doc,
+    Text,
     YMessageType,
     create_sync_message,
     create_update_message,
@@ -52,29 +39,46 @@ from pycrdt import (
     write_var_uint,
 )
 
+from app.auth import CollabUser, verify_token
 from app.config import (
-    _WS_ALLOWED_ORIGINS,
     COLLAB_CLIENT_QUEUE_MAXSIZE,
     COLLAB_MAX_MESSAGE_BYTES,
     COLLAB_MAX_ROOM_CLIENTS,
     COLLAB_ROOM_IDLE_SECONDS,
+    _WS_ALLOWED_ORIGINS,
+    get_settings,
+)
+from app.db import (
+    get_file,
+    get_session,
+    is_participant,
+    touch_session,
+    upsert_file_snapshot,
+    wake_session,
 )
 
 logger = logging.getLogger("exec-service")
 
 router = APIRouter()
 
+# room_id = "{session_id}:{file_id}" — both lowercase UUID hex + hyphens + colon
 _ROOM_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 
 # Custom close codes (4000-4999 are application-defined).
 _CLOSE_BAD_ORIGIN = 4003
 _CLOSE_BAD_ROOM = 4400
 _CLOSE_UNAUTHORIZED = 4401
+_CLOSE_FORBIDDEN = 4403
+_CLOSE_NOT_FOUND = 4404
+_CLOSE_SESSION_CLOSED = 4409
 _CLOSE_ROOM_FULL = 4429
 
 
 # ---------------------------------------------------------------------------
-# Persistence interface
+# Persistence interface (B5)
 # ---------------------------------------------------------------------------
 
 
@@ -82,15 +86,13 @@ class YStateStore(Protocol):
     """Where room documents live between sessions."""
 
     async def load(self, room_id: str) -> bytes | None: ...
-
     async def save(self, room_id: str, state: bytes) -> None: ...
 
 
 class InMemoryStateStore:
     """Default store: survives rooms being evicted, not a process restart.
 
-    Replace with a Postgres-backed store (Files.yjs_state) via
-    set_state_store() once the DB layer exists.
+    Used in tests and when COLLAB_PERSIST_ENABLED=False.
     """
 
     def __init__(self) -> None:
@@ -103,6 +105,50 @@ class InMemoryStateStore:
         self._data[room_id] = state
 
 
+class DbStateStore:
+    """Postgres-backed store: reads/writes files.yjs_state (B5).
+
+    room_id is "{session_id}:{file_id}".
+    Also extracts plain text from the Y.Text "content" key and writes it
+    to files.content so the rest of the app can read it without pycrdt.
+    """
+
+    async def load(self, room_id: str) -> bytes | None:
+        session_id, file_id = _split_room_id(room_id)
+        if session_id is None or file_id is None:
+            return None
+        row = await get_file(session_id, file_id)
+        if row is None:
+            return None
+        return row.get("yjs_state")
+
+    async def save(self, room_id: str, state: bytes) -> None:
+        session_id, file_id = _split_room_id(room_id)
+        if session_id is None or file_id is None:
+            return
+        # Attempt to extract plain text from the Y.Text named "content"
+        content: str | None = None
+        try:
+            doc = Doc()
+            doc.apply_update(state)
+            text_map = doc.get("content", type=Text)
+            content = str(text_map) if text_map is not None else None
+        except Exception:
+            pass  # non-text doc or key missing — skip content extraction
+        await upsert_file_snapshot(session_id, file_id, state, content)
+
+
+def _split_room_id(room_id: str) -> tuple[str, str] | tuple[None, None]:
+    """Parse "{session_id}:{file_id}" into its two UUID parts."""
+    parts = room_id.split(":", 1)
+    if len(parts) != 2:
+        return None, None
+    session_id, file_id = parts
+    if not (_UUID_RE.match(session_id) and _UUID_RE.match(file_id)):
+        return None, None
+    return session_id, file_id
+
+
 _store: YStateStore = InMemoryStateStore()
 
 
@@ -113,9 +159,6 @@ def set_state_store(store: YStateStore) -> None:
 
 # ---------------------------------------------------------------------------
 # Awareness wire helpers
-#
-# Awareness update payload = varUint count, then per entry:
-#   varUint clientID, varUint clock, varString JSON-state ("null" = removed)
 # ---------------------------------------------------------------------------
 
 
@@ -172,6 +215,7 @@ def _encode_awareness(entries: list[tuple[int, int, str]]) -> bytes:
 @dataclass(eq=False)
 class _Client:
     ws: WebSocket
+    user: CollabUser
     outbox: asyncio.Queue = field(
         default_factory=lambda: asyncio.Queue(maxsize=COLLAB_CLIENT_QUEUE_MAXSIZE)
     )
@@ -179,9 +223,9 @@ class _Client:
     dropped: bool = False
 
 
-async def _safe_close(ws: WebSocket, code: int) -> None:
+async def _safe_close(ws: WebSocket, code: int, reason: str = "") -> None:
     try:
-        await ws.close(code=code)
+        await ws.close(code=code, reason=reason)
     except Exception:
         pass
 
@@ -194,9 +238,7 @@ class _Room:
         self.awareness: dict[int, tuple[int, str]] = {}  # id -> (clock, json)
         self.dirty = False
         self.evict_handle: asyncio.TimerHandle | None = None
-        # The client whose message is currently being applied.  Set around
-        # handle_sync_message() (synchronous), so the doc observer can skip
-        # echoing an update back to the client that produced it.
+        self._snapshot_task: asyncio.Task | None = None
         self._origin: _Client | None = None
         self.doc.observe(self._on_update)
 
@@ -213,8 +255,6 @@ class _Room:
         try:
             client.outbox.put_nowait(msg)
         except asyncio.QueueFull:
-            # Too slow to keep up.  Drop the connection; on reconnect the
-            # y-websocket client re-syncs from the server doc, so nothing is lost.
             client.dropped = True
             logger.warning("Collab client too slow in room %s — dropping", self.room_id)
             asyncio.ensure_future(_safe_close(client.ws, 1013))
@@ -235,9 +275,60 @@ class _Room:
         await _store.save(self.room_id, self.doc.get_update())
         self.dirty = False
 
+    def _start_snapshot_loop(self) -> None:
+        """Start periodic debounced snapshot if persistence is enabled."""
+        settings = get_settings()
+        if not settings.COLLAB_PERSIST_ENABLED:
+            return
+        if self._snapshot_task is not None and not self._snapshot_task.done():
+            return
+        self._snapshot_task = asyncio.ensure_future(self._snapshot_loop())
+
+    def _stop_snapshot_loop(self) -> None:
+        if self._snapshot_task is not None:
+            self._snapshot_task.cancel()
+            self._snapshot_task = None
+
+    async def _snapshot_loop(self) -> None:
+        settings = get_settings()
+        interval = settings.COLLAB_SNAPSHOT_INTERVAL
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                if self.dirty:
+                    try:
+                        await self.save()
+                        logger.debug(
+                            "Collab room %s: periodic snapshot saved", self.room_id
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Collab room %s: periodic snapshot failed", self.room_id
+                        )
+        except asyncio.CancelledError:
+            pass
+
 
 _rooms: dict[str, _Room] = {}
 _registry_lock = asyncio.Lock()
+
+
+async def close_room_for_file(file_id: str, code: int = 4404, reason: str = "File deleted") -> None:
+    """
+    Close any active in-memory room for this file_id without saving snapshot.
+    Prevents resurrected rows on file deletion.
+    """
+    async with _registry_lock:
+        to_remove = [r for rid, r in _rooms.items() if rid.endswith(f":{file_id}")]
+        for room in to_remove:
+            room.cancel_eviction()
+            room._stop_snapshot_loop()
+            room.dirty = False  # skip flush
+            for c in list(room.clients):
+                c.dropped = True
+                asyncio.ensure_future(_safe_close(c.ws, code, reason))
+            _rooms.pop(room.room_id, None)
+            logger.info("Closed collab room %s for deleted file %s", room.room_id, file_id)
 
 
 async def _join_room(room_id: str, client: _Client) -> _Room | None:
@@ -246,15 +337,29 @@ async def _join_room(room_id: str, client: _Client) -> _Room | None:
         room = _rooms.get(room_id)
         if room is None:
             room = _Room(room_id)
-            saved = await _store.load(room_id)
-            if saved:
-                room.doc.apply_update(saved)
-                room.dirty = False
+            settings = get_settings()
+            if settings.COLLAB_PERSIST_ENABLED:
+                saved = await _store.load(room_id)
+                if saved:
+                    room.doc.apply_update(saved)
+                    room.dirty = False
+                else:
+                    session_id, file_id = _split_room_id(room_id)
+                    if session_id and file_id:
+                        row = await get_file(session_id, file_id)
+                        if row and row.get("content"):
+                            text_val = row["content"]
+                            ytext = Text()
+                            room.doc["content"] = ytext
+                            ytext += text_val
+                            room.dirty = True
+                            await room.save()
             _rooms[room_id] = room
         if len(room.clients) >= COLLAB_MAX_ROOM_CLIENTS:
             return None
         room.cancel_eviction()
         room.clients.add(client)
+        room._start_snapshot_loop()
         return room
 
 
@@ -270,24 +375,31 @@ async def _evict(room: _Room) -> None:
     async with _registry_lock:
         if room.clients or _rooms.get(room.room_id) is not room:
             return
-        try:
-            await room.save()
-        except Exception:
-            # Never discard unsaved state: keep the room and retry later.
-            logger.exception("Saving room %s failed — keeping it in memory", room.room_id)
-            _schedule_eviction(room)
-            return
+        room._stop_snapshot_loop()
+        settings = get_settings()
+        if settings.COLLAB_PERSIST_ENABLED:
+            try:
+                await room.save()
+            except Exception:
+                logger.exception(
+                    "Saving room %s failed — keeping it in memory", room.room_id
+                )
+                _schedule_eviction(room)
+                return
         del _rooms[room.room_id]
         logger.info("Collab room %s evicted", room.room_id)
 
 
 async def flush_all_rooms() -> None:
-    """Persist every dirty room.  Call from the app shutdown hook."""
+    """Persist every dirty room. Call from the app shutdown hook."""
+    settings = get_settings()
     for room in list(_rooms.values()):
-        try:
-            await room.save()
-        except Exception:
-            logger.exception("Flushing room %s failed", room.room_id)
+        room._stop_snapshot_loop()
+        if settings.COLLAB_PERSIST_ENABLED:
+            try:
+                await room.save()
+            except Exception:
+                logger.exception("Flushing room %s failed", room.room_id)
 
 
 def collab_stats() -> dict:
@@ -303,7 +415,7 @@ def collab_stats() -> dict:
 
 
 def _handle_message(room: _Room, client: _Client, data: bytes) -> None:
-    """Process one binary frame.  Raises ValueError on malformed input."""
+    """Process one binary frame. Raises ValueError on malformed input."""
     if len(data) < 2:
         raise ValueError("frame too short")
     mtype = data[0]
@@ -337,8 +449,6 @@ def _handle_message(room: _Room, client: _Client, data: bytes) -> None:
                 client.awareness_ids.add(cid)
         room.broadcast(data, exclude=client)
 
-    # Other message types (e.g. y-websocket auth = 2) are ignored.
-
 
 def _leave_room(room: _Room, client: _Client) -> None:
     room.clients.discard(client)
@@ -353,6 +463,7 @@ def _leave_room(room: _Room, client: _Client) -> None:
         room.broadcast(_encode_awareness(removed))
 
     if not room.clients:
+        room._stop_snapshot_loop()
         _schedule_eviction(room)
 
 
@@ -364,53 +475,107 @@ async def _sender(client: _Client) -> None:
     except asyncio.CancelledError:
         raise
     except Exception:
-        pass  # socket died; the receive loop will notice and clean up
-
-
-async def _authorize(websocket: WebSocket, room_id: str) -> bool:
-    """Hook for auth / RBAC (e.g. validate a token query param and check that
-    the user participates in this session).  Currently allows everyone."""
-    return True
+        pass
 
 
 # ---------------------------------------------------------------------------
-# Endpoint
+# Internal WS auth helper (does not log token)
+# ---------------------------------------------------------------------------
+
+
+async def _get_current_user_ws(token: str) -> CollabUser | None:
+    """Validate the ?token= query param. Returns None on failure."""
+    if not token:
+        return None
+    try:
+        return verify_token(token)
+    except HTTPException:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Endpoint (B1 + B3 + B4 + B5)
 # ---------------------------------------------------------------------------
 
 
 @router.websocket("/ws/collab/{room_id}")
-async def ws_collab(websocket: WebSocket, room_id: str):
+async def ws_collab(websocket: WebSocket, room_id: str, token: str = ""):
+    # B1: configurable origin check (before accept)
     origin = websocket.headers.get("origin", "")
     if origin and origin not in _WS_ALLOWED_ORIGINS:
         await websocket.close(code=_CLOSE_BAD_ORIGIN, reason="Origin not allowed")
         return
 
+    # Room ID must match the allowed pattern
     if not _ROOM_ID_RE.match(room_id):
         await websocket.close(code=_CLOSE_BAD_ROOM, reason="Invalid room id")
         return
 
-    if not await _authorize(websocket, room_id):
-        await websocket.close(code=_CLOSE_UNAUTHORIZED, reason="Unauthorized")
+    # B3: validate token BEFORE accepting — never log the raw token
+    user = await _get_current_user_ws(token)
+    if user is None:
+        await websocket.close(code=_CLOSE_UNAUTHORIZED, reason="Unauthenticated")
         return
 
+    # B4: parse room_id into session_id + file_id
+    session_id, file_id = _split_room_id(room_id)
+    if session_id is None or file_id is None:
+        await websocket.close(
+            code=_CLOSE_BAD_ROOM,
+            reason="room_id must be {session_id}:{file_id}",
+        )
+        return
+
+    # B4: session must exist
+    sess = await get_session(session_id)
+    if sess is None:
+        await websocket.close(code=_CLOSE_NOT_FOUND, reason="Session not found")
+        return
+
+    # B4: session must not be closed
+    if sess["status"] == "closed":
+        await websocket.close(code=_CLOSE_SESSION_CLOSED, reason="Session is closed")
+        return
+
+    # Part 1.5: Wake hibernated session
+    if sess["status"] == "hibernated":
+        await wake_session(session_id)
+
+    # B4: file must belong to this session
+    file_row = await get_file(session_id, file_id)
+    if file_row is None:
+        await websocket.close(code=_CLOSE_NOT_FOUND, reason="File not found in session")
+        return
+
+    # B4: user must be owner or open participant
+    authorized = await is_participant(session_id, user.id)
+    if not authorized:
+        await websocket.close(code=_CLOSE_FORBIDDEN, reason="Not a member of this session")
+        return
+
+    # All checks passed — accept the WebSocket
     await websocket.accept()
 
-    client = _Client(ws=websocket)
+    client = _Client(ws=websocket, user=user)
     room = await _join_room(room_id, client)
     if room is None:
         await websocket.close(code=_CLOSE_ROOM_FULL, reason="Room is full")
         return
 
     sender = asyncio.ensure_future(_sender(client))
+    _touch_task: asyncio.Task | None = None
+
     try:
-        # Kick off the handshake: our state vector (client answers with
-        # whatever we're missing) and everyone's current presence.
         room.send(client, create_sync_message(room.doc))
         if room.awareness:
             room.send(
                 client,
-                _encode_awareness([(c, ck, st) for c, (ck, st) in room.awareness.items()]),
+                _encode_awareness(
+                    [(c, ck, st) for c, (ck, st) in room.awareness.items()]
+                ),
             )
+
+        _touch_task = asyncio.ensure_future(touch_session(session_id))
 
         while True:
             msg = await websocket.receive()
@@ -438,3 +603,8 @@ async def ws_collab(websocket: WebSocket, room_id: str):
             await sender
         except asyncio.CancelledError:
             pass
+        if _touch_task is not None:
+            try:
+                await _touch_task
+            except Exception:
+                pass
