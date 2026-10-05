@@ -4,6 +4,9 @@ import { EditorPage } from '../pages/EditorPage';
 import { ComingSoonPage } from '../pages/ComingSoonPage';
 import { RiskAnalysisPage } from '../pages/RiskAnalysisPage';
 import { SessionsPage } from '../pages/SessionsPage';
+import { SettingsPage } from '../pages/SettingsPage';
+import { ProfilePage } from '../pages/ProfilePage';
+import { CollaborationPage } from '../pages/CollaborationPage';
 
 /**
  * Central route table. Every route unavailable-by-backend renders
@@ -16,16 +19,12 @@ export function AppRoutes() {
       <Route element={<MainLayout />}>
         <Route path="/" element={<Navigate to="/editor" replace />} />
         <Route path="/editor" element={<EditorPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route
-          path="/collaboration"
-          element={
-            <ComingSoonPage
-              title="Collaboration"
-              description="Live multi-cursor editing will appear here once the collab-gateway (Yjs) backend is running."
-              badge="Coming Soon"
-            />
-          }
+          path="/collaboration/:roomId?"
+          element={<CollaborationPage />}
         />
         <Route path="/risk" element={<RiskAnalysisPage />} />
         <Route

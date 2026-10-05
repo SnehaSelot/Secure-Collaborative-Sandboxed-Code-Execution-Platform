@@ -22,7 +22,7 @@ interface ExecutionState {
   stdoutTruncated: boolean;
   stderrTruncated: boolean;
 
-  startExecution: (code: string, language: string) => void;
+  startExecution: (code: string, language: string, retainOutput?: boolean) => void;
   setResult: (result: ExecuteResponse) => void;
   setError: (error: string) => void;
   resetExecution: () => void;
@@ -43,17 +43,17 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
   stdoutTruncated: false,
   stderrTruncated: false,
 
-  startExecution: (code, language) =>
-    set({
+  startExecution: (code, language, retainOutput = false) =>
+    set((state) => ({
       isRunning: true,
       error: null,
       result: null,
       lastCode: code,
       lastLanguage: language,
-      terminalLines: [],
+      terminalLines: retainOutput ? state.terminalLines : [],
       stdoutTruncated: false,
       stderrTruncated: false,
-    }),
+    })),
 
   setResult: (result) =>
     set({ isRunning: false, result, error: null }),

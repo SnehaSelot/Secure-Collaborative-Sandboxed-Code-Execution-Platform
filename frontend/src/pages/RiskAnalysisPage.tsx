@@ -41,9 +41,6 @@ export function RiskAnalysisPage() {
             leaves your machine. Not yet the full AI-backed analysis service.
           </p>
         </div>
-        <span className="inline-block rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-400">
-          Preview
-        </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-neutral-900/60 p-4">

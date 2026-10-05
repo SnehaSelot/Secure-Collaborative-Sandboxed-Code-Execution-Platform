@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 
-type Badge = 'Coming Soon' | 'Preview' | 'Backend Required';
+type Badge = 'Coming Soon' | 'Backend Required';
 
 interface NavItem {
   to: string;
@@ -77,19 +77,17 @@ const ICONS = {
 const NAV_ITEMS: NavItem[] = [
   { to: '/editor', label: 'Editor', icon: ICONS.editor },
  {
-    to: '/collaboration',
-    label: 'Collaboration',
-    icon: ICONS.collaboration,
-    badge: 'Coming Soon',
-  },
-    { to: '/sessions', label: 'Sessions', icon: ICONS.sessions, badge: 'Preview' },
-  { to: '/risk', label: 'Risk Analysis', icon: ICONS.risk, badge: 'Preview' },
+   to: '/collaboration',
+   label: 'Collaboration',
+   icon: ICONS.collaboration,
+ },
+ { to: '/sessions', label: 'Sessions', icon: ICONS.sessions },
+  { to: '/risk', label: 'Risk Analysis', icon: ICONS.risk },
   { to: '/admin', label: 'Admin', icon: ICONS.admin, badge: 'Backend Required' },
 ];
 
 const BADGE_STYLES: Record<Badge, string> = {
   'Coming Soon': 'bg-white/5 text-neutral-400 border-white/10',
-  Preview: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   'Backend Required': 'bg-red-500/10 text-red-400 border-red-500/20',
 };
 
@@ -149,12 +147,18 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-white/10 p-3">
-        <button
-          type="button"
-          title={collapsed ? 'Settings — coming soon' : 'Settings — coming soon, no persistence backend yet'}
-          className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-neutral-500 transition hover:bg-white/5 hover:text-neutral-300 ${
-            collapsed ? 'justify-center' : ''
-          }`}
+        <NavLink
+          to="/settings"
+          title={collapsed ? 'Settings' : undefined}
+          className={({ isActive }) =>
+            `flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition ${
+              collapsed ? 'justify-center' : ''
+            } ${
+              isActive
+                ? 'bg-emerald-500/10 text-emerald-400'
+                : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-100'
+            }`
+          }
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
             {ICONS.settings}
@@ -162,12 +166,9 @@ export function Sidebar() {
           {!collapsed && (
             <>
               <span className="flex-1 text-left">Settings</span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] leading-none text-neutral-400">
-                Coming Soon
-              </span>
             </>
           )}
-        </button>
+        </NavLink>
 
         <button
           type="button"
