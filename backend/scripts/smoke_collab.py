@@ -65,7 +65,7 @@ async def main():
         log_step("Step 1: Signup User A and User B", True, f"Alice ({email_a}), Bob ({email_b})")
 
         # -------------------------------------------------------------------
-        # Step 2: User A creates a session and a file
+        # Step 2: User A creates a session, joins it, and creates a file
         # -------------------------------------------------------------------
         sess_resp = await client.post(
             "/sessions",
@@ -74,18 +74,40 @@ async def main():
         )
         if sess_resp.status_code != 201:
             log_step("Step 2: Create session", False, f"Status: {sess_resp.status_code}")
+
         session_id = sess_resp.json()["session_id"]
+
+        # The session owner must also be a member before creating files.
+        join_a_resp = await client.post(
+            f"/sessions/{session_id}/join",
+            headers=headers_a,
+        )
+        if join_a_resp.status_code != 200:
+            log_step("Step 2: User A join session", False, f"Status: {join_a_resp.status_code}")
 
         file_resp = await client.post(
             f"/sessions/{session_id}/files",
             headers=headers_a,
-            json={"path": "main.py", "language": "python", "content": "# initial content\n"},
+            json={
+                "path": "main.py",
+                "language": "python",
+                "content": "# initial content\n",
+            },
         )
         if file_resp.status_code != 201:
-            log_step("Step 2: Create file", False, f"Status: {file_resp.status_code}")
-        file_id = file_resp.json()["id"]
-        log_step("Step 2: User A created session and file", True, f"Session: {session_id}, File: {file_id}")
+            log_step(
+                "Step 2: Create file",
+                False,
+                f"Status: {file_resp.status_code}, Body: {file_resp.text}",
+            )
 
+        file_id = file_resp.json()["id"]
+
+        log_step(
+            "Step 2: User A created session and file",
+            True,
+            f"Session: {session_id}, File: {file_id}",
+        )
         # -------------------------------------------------------------------
         # Step 3: User B joins the session
         # -------------------------------------------------------------------
@@ -136,7 +158,7 @@ async def main():
             if "hello from Alice!" not in b_content:
                 # If not applied directly via handle_sync_message, apply raw update
                 try:
-                    doc_b.apply_update(received_msg[2:])
+                    doc_b.apply_update(received_msg[2:]) #type:ignore
                     b_content = str(doc_b.get("content", type=Text))
                 except Exception:
                     pass

@@ -156,3 +156,14 @@ CREATE INDEX idx_audit_entity  ON audit_logs (entity_type, entity_id);
 -- CREATE ROLE app_user LOGIN PASSWORD '...';
 -- GRANT SELECT, INSERT ON audit_logs TO app_user;
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_logs FROM PUBLIC;
+
+INSERT INTO languages (name, pids_limit, fsize_limit_mb, timeout_seconds)
+VALUES
+    ('python',     32,  10, 15),
+    ('javascript', 32,  10, 15),
+    ('java',       64,  32, 30),
+    ('c',          32,  32, 20),
+    ('cpp',        32,  32, 20),
+    ('go',         128, 256, 60),
+    ('rust',       64,  64, 60)
+ON CONFLICT (name) DO NOTHING;
