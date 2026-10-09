@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import socket
 import sys
 import zipfile
@@ -53,6 +54,26 @@ def group_for(rel: Path, depth: int) -> str:
 
 
 def iter_source(root: Path, depth: int, max_bytes: int, zip_password: bytes, stats: Counter):
+    if root.is_file() and root.suffix.lower() == ".jsonl":
+        # Adapter for archives_to_jsonl.py records: {id, pkg, text, label, file}.
+        # Read each line as data and convert it to the canonical ingest shape.
+        with root.open("r", encoding="utf-8") as fh:
+            for line_no, line in enumerate(fh, 1):
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                    pkg = str(rec["pkg"])
+                    code = str(rec["text"])
+                    rel = str(rec.get("id", f"line-{line_no}"))
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                    stats["invalid_jsonl"] += 1
+                    continue
+                if len(code.encode("utf-8", errors="replace")) > max_bytes:
+                    stats["skipped_too_big"] += 1
+                    continue
+                yield rel, pkg, code.encode("utf-8")
+        return
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue

@@ -12,3 +12,17 @@ __pycache__/
 backend/exec_tmp/
 backend/learning/
 dist/
+
+# ML datasets / generated artifacts
+ml/data/raw/
+ml/data/interim/
+ml/data/cleaned/
+ml/data/splits/
+ml/data/features/
+
+# Trained model
+models/
+
+ml/data/
+*.tar
+*.jsonl
