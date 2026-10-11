@@ -10,6 +10,8 @@ services:
       # resolved against the HOST filesystem, not this container's — see
       # executor.py's _code_workspace(). Set HOST_PROJECT_DIR in your .env
       # file (repo root) to this repo's ABSOLUTE path on your machine.
+      COLLAB_JWT_SECRET: ${COLLAB_JWT_SECRET}
+
       EXEC_TMP_HOST_PATH: ${HOST_PROJECT_DIR}/backend/exec_tmp
     depends_on:
       - postgres

@@ -26,11 +26,18 @@ export function CreateItemModal() {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Reset + autofocus every time the modal opens.
-  useEffect(() => {
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen);
     if (isOpen) {
       setName('');
       setError(null);
+    }
+  }
+
+  // Autofocus every time the modal opens.
+  useEffect(() => {
+    if (isOpen) {
       // Focus after the element has actually painted.
       const id = requestAnimationFrame(() => inputRef.current?.focus());
       return () => cancelAnimationFrame(id);

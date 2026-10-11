@@ -34,15 +34,7 @@ export function ParticipantPresence({
     participantSnapshot?.awareness === awareness ? participantSnapshot.participants : [];
 
   if (!awareness) {
-    return (
-      <span
-        className="text-[10px] text-neutral-500"
-        role="status"
-        title="Network presence is unavailable in local-only mode."
-      >
-        Presence unavailable (local only)
-      </span>
-    );
+    return null;
   }
 
   if (participants.length === 0) {
@@ -63,10 +55,12 @@ export function ParticipantPresence({
           aria-label={participant.isLocal ? `${participant.displayName} (you)` : participant.displayName}
         >
           <span
-            className="h-1.5 w-1.5 rounded-full"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-neutral-950"
             style={{ backgroundColor: participant.color }}
             aria-hidden="true"
-          />
+          >
+            {participant.displayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('')}
+          </span>
           {showNames && (
             <>
               <span>{participant.displayName}</span>

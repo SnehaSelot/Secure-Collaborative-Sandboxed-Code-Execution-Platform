@@ -11,5 +11,15 @@ export const env = {
     /^http/,
     'ws',
   ),
-  collaborationWsBaseUrl: import.meta.env.VITE_COLLABORATION_WS_URL ?? null,
+  /**
+   * F1: Collaboration WebSocket base URL.
+   * Derived from apiBaseUrl by swapping the scheme (http→ws / https→wss)
+   * and appending /ws/collab — matching the backend route /ws/collab/{room_id}.
+   * Override with VITE_COLLABORATION_WS_URL for non-standard deployments.
+   * Default: ws://localhost:8000/ws/collab
+   */
+  collaborationWsBaseUrl: import.meta.env.VITE_COLLABORATION_WS_URL ??
+    (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000')
+      .replace(/^http/, 'ws')
+      .replace(/\/$/, '') + '/ws/collab',
 } as const;

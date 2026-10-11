@@ -140,3 +140,26 @@ body {
 :root[data-theme='light'] [class~='border-white/5'] {
   border-color: rgb(15 23 42 / 12%);
 }
+
+/* F6: Monaco remote cursor & selection styling for y-monaco */
+.yRemoteSelection {
+  background-color: rgba(56, 189, 248, 0.25);
+}
+
+.yRemoteSelectionHead {
+  position: absolute;
+  border-left: 2px solid #38bdf8;
+  border-top: 2px solid #38bdf8;
+  border-bottom: 2px solid #38bdf8;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.yRemoteSelectionHead::after {
+  position: absolute;
+  content: ' ';
+  border: 3px solid #38bdf8;
+  border-radius: 4px;
+  left: -4px;
+  top: -5px;
+}

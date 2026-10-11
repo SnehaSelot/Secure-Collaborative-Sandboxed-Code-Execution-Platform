@@ -846,7 +846,7 @@ class TestCollabFilesEndpoints:
             patch(
                 "app.routers.collab_files.create_file",
                 new=AsyncMock(return_value=file_data),
-            ),
+            ) as mock_create,
             patch(
                 "app.routers.collab_files.write_audit_log", new=AsyncMock()
             ) as mock_audit,
@@ -864,6 +864,12 @@ class TestCollabFilesEndpoints:
             body = resp.json()
             assert body["path"] == "src/main.py"
             assert body["id"] == FILE_ID
+            created = mock_create.call_args.kwargs
+            assert created["content"] == "print('hello')"
+            assert created["yjs_state"]
+            initialized_doc = Doc()
+            initialized_doc.apply_update(created["yjs_state"])
+            assert str(initialized_doc.get("content", type=Text)) == "print('hello')"
             mock_audit.assert_called_once()
             assert mock_audit.call_args[1]["action"] == "file.create"
 

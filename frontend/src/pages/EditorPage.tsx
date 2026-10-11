@@ -150,7 +150,7 @@ export function EditorPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="text-sm text-neutral-400">{activeFile.name}</span>
-              {activeProviderSnapshot && (
+              {activeProviderSnapshot && activeProviderSnapshot.status !== 'local-only' && (
                 <>
                   <span
                     className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${PROVIDER_STATUS_STYLES[activeProviderSnapshot.status]}`}

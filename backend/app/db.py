@@ -73,7 +73,7 @@ async def close_engine() -> None:
 
 
 async def seed_roles() -> None:
-    """Insert default roles if they do not exist yet."""
+    """Insert default roles and languages if they do not exist yet."""
     factory = get_session_factory()
     async with factory() as session:
         for name in ("admin", "reviewer", "member"):
@@ -83,6 +83,24 @@ async def seed_roles() -> None:
                     "ON CONFLICT (name) DO NOTHING"
                 ),
                 {"name": name},
+            )
+        default_languages = [
+            ("python", 32, 10, 15),
+            ("javascript", 32, 10, 15),
+            ("java", 64, 32, 30),
+            ("c", 32, 32, 20),
+            ("cpp", 32, 32, 20),
+            ("go", 128, 256, 60),
+            ("rust", 64, 64, 60),
+        ]
+        for lang_name, pids, fsize, timeout in default_languages:
+            await session.execute(
+                text(
+                    "INSERT INTO languages (name, pids_limit, fsize_limit_mb, timeout_seconds) "
+                    "VALUES (:name, :pids, :fsize, :timeout) "
+                    "ON CONFLICT (name) DO NOTHING"
+                ),
+                {"name": lang_name, "pids": pids, "fsize": fsize, "timeout": timeout},
             )
         await session.commit()
 
@@ -414,8 +432,9 @@ async def create_file(
     path: str,
     language_id: int | None = None,
     content: str = "",
+    yjs_state: bytes | None = None,
 ) -> dict:
-    """Create a new file row. yjs_state is intentionally NULL."""
+    """Create a new file row, optionally with its initial Yjs snapshot."""
     fid = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     factory = get_session_factory()
@@ -423,7 +442,7 @@ async def create_file(
         await session.execute(
             text(
                 "INSERT INTO files (id, session_id, path, language_id, content, yjs_state, updated_at) "
-                "VALUES (:id, :session_id, :path, :language_id, :content, NULL, :now)"
+                "VALUES (:id, :session_id, :path, :language_id, :content, :yjs_state, :now)"
             ),
             {
                 "id": fid,
@@ -431,6 +450,7 @@ async def create_file(
                 "path": path,
                 "language_id": language_id,
                 "content": content,
+                "yjs_state": yjs_state,
                 "now": now,
             },
         )

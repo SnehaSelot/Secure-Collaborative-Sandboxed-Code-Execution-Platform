@@ -18,8 +18,19 @@ const PARTICIPANT_COLORS = [
   '#e879f9',
 ];
 
+/** Exported alias for use in awareness color assignment. */
+export const PARTICIPANT_COLORS_ARRAY = PARTICIPANT_COLORS;
+
+
+
 function colorForClient(clientId: number): string {
   return PARTICIPANT_COLORS[Math.abs(clientId) % PARTICIPANT_COLORS.length];
+}
+
+export function colorForName(name: string): string {
+  let hash = 0;
+  for (const char of name.trim().toLowerCase()) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  return PARTICIPANT_COLORS[Math.abs(hash) % PARTICIPANT_COLORS.length];
 }
 
 export function getParticipants(awareness: Awareness): Participant[] {
@@ -33,19 +44,30 @@ export function getParticipants(awareness: Awareness): Participant[] {
       return [{
         clientId,
         displayName: suppliedName || `Participant ${clientId.toString(36)}`,
-        color: colorForClient(clientId),
+        color: 'color' in user && typeof user.color === 'string' && PARTICIPANT_COLORS.includes(user.color)
+          ? user.color
+          : colorForClient(clientId),
         isLocal: clientId === awareness.clientID,
       }];
     })
     .sort((left, right) => left.clientId - right.clientId);
 
+  const usedColors = new Set<string>();
   const nameCounts = new Map<string, number>();
   return participants.map((participant) => {
     const count = (nameCounts.get(participant.displayName) ?? 0) + 1;
     nameCounts.set(participant.displayName, count);
 
+    let color = participant.color;
+    if (usedColors.has(color)) {
+      let colorIndex = Math.abs(participant.clientId) % PARTICIPANT_COLORS.length;
+      while (usedColors.has(PARTICIPANT_COLORS[colorIndex]) && usedColors.size < PARTICIPANT_COLORS.length) colorIndex = (colorIndex + 1) % PARTICIPANT_COLORS.length;
+      color = PARTICIPANT_COLORS[colorIndex];
+    }
+    usedColors.add(color);
+
     return count === 1
-      ? participant
-      : { ...participant, displayName: `${participant.displayName} (${count})` };
+      ? { ...participant, color }
+      : { ...participant, color, displayName: `${participant.displayName} (${count})` };
   });
 }

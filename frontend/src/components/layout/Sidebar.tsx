@@ -1,5 +1,5 @@
-import { NavLink } from 'react-router-dom';
-import { useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 type Badge = 'Coming Soon' | 'Backend Required';
@@ -97,6 +97,32 @@ export function Sidebar() {
   // that nothing else needs stays as useState here). Nothing else reads
   // whether the sidebar is collapsed, so it isn't a Zustand store.
   const [collapsed, setCollapsed] = useState(false);
+  const [lastRoomId, setLastRoomId] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem('glasshouse:last-collaboration-room');
+    } catch {
+      return null;
+    }
+  });
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    const clearLastRoom = () => setLastRoomId(null);
+    window.addEventListener('glasshouse:collaboration-exited', clearLastRoom);
+    return () => window.removeEventListener('glasshouse:collaboration-exited', clearLastRoom);
+  }, []);
+
+  useEffect(() => {
+    const match = pathname.match(/^\/collaboration\/([^/]+)\/?$/);
+    if (!match) return;
+    try {
+      const roomId = decodeURIComponent(match[1]);
+      sessionStorage.setItem('glasshouse:last-collaboration-room', roomId);
+      setLastRoomId(roomId);
+    } catch {
+      // Keep navigation functional when session storage is unavailable.
+    }
+  }, [pathname]);
 
   return (
     <aside
@@ -108,7 +134,9 @@ export function Sidebar() {
         {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}
-            to={item.to}
+            to={item.label === 'Collaboration' && lastRoomId
+              ? `/collaboration/${encodeURIComponent(lastRoomId)}`
+              : item.to}
             title={collapsed ? item.label : undefined}
             className={({ isActive }) =>
               `flex items-center gap-3 rounded-md px-3 py-2 text-sm transition ${

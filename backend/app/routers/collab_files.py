@@ -17,6 +17,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from pycrdt import Doc, Text
 
 from app.auth import CollabUser, get_current_user
 from app.db import (
@@ -177,11 +178,20 @@ async def create_file_endpoint(
             detail=f"File '{norm_path}' already exists in this session",
         )
 
+    initial_content = req.content or ""
+    initial_yjs_state = None
+    if initial_content:
+        doc = Doc()
+        shared_text = doc.get("content", type=Text)
+        shared_text.insert(0, initial_content)
+        initial_yjs_state = doc.get_update()
+
     file_row = await create_file(
         session_id=session_id,
         path=norm_path,
         language_id=language_id,
-        content=req.content or "",
+        content=initial_content,
+        yjs_state=initial_yjs_state,
     )
 
     await write_audit_log(
