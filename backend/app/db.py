@@ -559,3 +559,166 @@ async def write_audit_log(
             },
         )
         await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Risk analysis (risk_assessments / risk_findings / system_settings)
+# ---------------------------------------------------------------------------
+
+_RISK_DECISIONS = frozenset({"allow", "flag", "block"})
+_RISK_SOURCES = frozenset({"rule", "ast", "ml", "llm"})
+
+
+def _jsonb_to_number(raw) -> float | None:
+    """Coerce a system_settings JSONB value to a float.
+
+    Accepts a bare number (``40``) or ``{"value": 40}``.  asyncpg returns raw
+    JSONB as ``str`` for plain text() queries, so decode that first.
+    """
+    if isinstance(raw, (str, bytes)):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return None
+    if isinstance(raw, dict):
+        raw = raw.get("value")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    return float(raw)
+
+
+async def get_risk_thresholds() -> tuple[float, float] | None:
+    """Return ``(flag, block)`` from system_settings, or None.
+
+    None means "use the static config defaults": either a row is missing, a
+    value is not numeric, or the pair violates 0 <= flag < block <= 100.
+    Never raises on bad data (the caller decides what to do on a DB error).
+    """
+    factory = get_session_factory()
+    async with factory() as session:
+        rows = await session.execute(
+            text("SELECT key, value FROM system_settings " "WHERE key = ANY(:keys)"),
+            {"keys": ["risk_flag_threshold", "risk_block_threshold"]},
+        )
+        found = {r.key: _jsonb_to_number(r.value) for r in rows.fetchall()}
+
+    flag = found.get("risk_flag_threshold")
+    block = found.get("risk_block_threshold")
+    if flag is None or block is None:
+        return None
+    if not (0 <= flag < block <= 100):
+        logger.warning(
+            "Ignoring invalid risk thresholds in system_settings "
+            "(flag=%s, block=%s)",
+            flag,
+            block,
+        )
+        return None
+    return flag, block
+
+
+async def record_risk_assessment(
+    execution_id: str,
+    score: float,
+    threshold_applied: float,
+    decision: str,
+    findings: list[dict],
+) -> str:
+    """Insert a risk_assessments row plus its risk_findings in ONE transaction.
+
+    Returns the assessment id.  Idempotent per execution: risk_assessments has
+    UNIQUE(execution_id), so a second call returns the existing id and does
+    not add findings.
+
+    ``threshold_applied`` is the threshold that decided the outcome: the block
+    threshold for a 'block', the flag threshold for 'flag' / 'allow'.
+
+    Each finding dict may contain:
+        rule_code  : str | None   resolved to risk_rules.id when the rule is
+                                  seeded; otherwise rule_id stays NULL and the
+                                  code is preserved in detail["rule_code"]
+        source     : 'rule' | 'ast' | 'ml' | 'llm'   (default 'rule')
+        line_start : int | None
+        line_end   : int | None
+        confidence : float | None   clamped to [0, 1], 3 decimal places
+        detail     : dict | None
+    """
+    if decision not in _RISK_DECISIONS:
+        raise ValueError(f"Invalid risk decision: {decision!r}")
+
+    # A flagged execution waits for an admin/reviewer; others need no review.
+    review_status = "pending" if decision == "flag" else "none"
+
+    factory = get_session_factory()
+    async with factory() as session:
+        res = await session.execute(
+            text(
+                "INSERT INTO risk_assessments "
+                "(execution_id, score, threshold_applied, decision, review_status) "
+                "VALUES (:execution_id, :score, :threshold, :decision, :review_status) "
+                "ON CONFLICT (execution_id) DO NOTHING "
+                "RETURNING id"
+            ),
+            {
+                "execution_id": execution_id,
+                "score": round(float(score), 2),
+                "threshold": round(float(threshold_applied), 2),
+                "decision": decision,
+                "review_status": review_status,
+            },
+        )
+        row = res.fetchone()
+        if row is None:
+            existing = await session.execute(
+                text("SELECT id FROM risk_assessments WHERE execution_id = :eid"),
+                {"eid": execution_id},
+            )
+            return str(existing.scalar_one())
+        assessment_id = str(row[0])
+
+        if findings:
+            codes = sorted({f["rule_code"] for f in findings if f.get("rule_code")})
+            rule_ids: dict[str, str] = {}
+            if codes:
+                rr = await session.execute(
+                    text("SELECT code, id FROM risk_rules WHERE code = ANY(:codes)"),
+                    {"codes": codes},
+                )
+                rule_ids = {r.code: str(r.id) for r in rr.fetchall()}
+
+            params = []
+            for f in findings:
+                code = f.get("rule_code")
+                source = f.get("source") or "rule"
+                if source not in _RISK_SOURCES:
+                    source = "rule"
+                detail = dict(f.get("detail") or {})
+                if code:
+                    detail.setdefault("rule_code", code)
+                conf = f.get("confidence")
+                if conf is not None:
+                    conf = round(min(max(float(conf), 0.0), 1.0), 3)
+                params.append(
+                    {
+                        "assessment_id": assessment_id,
+                        "rule_id": rule_ids.get(code) if code else None,
+                        "source": source,
+                        "line_start": f.get("line_start"),
+                        "line_end": f.get("line_end"),
+                        "confidence": conf,
+                        "detail": json.dumps(detail) if detail else None,
+                    }
+                )
+            await session.execute(
+                text(
+                    "INSERT INTO risk_findings "
+                    "(assessment_id, rule_id, source, line_start, line_end, "
+                    " confidence, detail) "
+                    "VALUES (:assessment_id, :rule_id, :source, :line_start, "
+                    "        :line_end, :confidence, CAST(:detail AS JSONB))"
+                ),
+                params,
+            )
+
+        await session.commit()
+    return assessment_id

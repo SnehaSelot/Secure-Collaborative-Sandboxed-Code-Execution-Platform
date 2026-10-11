@@ -16,6 +16,7 @@ services:
     volumes:
       - ./backend:/app # live-reloads code into the container while you dev
       - ./backend/exec_tmp:/exec_tmp # shared workspace for submitted code — see note above
+      - ./models:/app/models:ro # trained risk ML model artifact
       # Gives this container access to the HOST's Docker daemon so it can spawn
       # sibling sandbox containers (socket passthrough, NOT Docker-in-Docker).
       # Without this, docker.from_env() has no daemon to talk to and every

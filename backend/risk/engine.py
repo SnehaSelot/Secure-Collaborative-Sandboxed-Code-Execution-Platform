@@ -13,13 +13,34 @@ from __future__ import annotations
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 from .features import FEATURE_NAMES, FEATURES_VERSION, extract
 from .rules import normalize_language
 from .scorer import DEFAULT_THRESHOLDS, Finding, RiskResult, Thresholds, decide, score, severity_for
 
-DEFAULT_MODEL_PATH = os.environ.get("RISK_MODEL_PATH", "models/py_risk.joblib")
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def get_default_model_path() -> str:
+    env_path = os.environ.get("RISK_MODEL_PATH")
+    if env_path:
+        return env_path
+    candidates = [
+        _REPO_ROOT / "ml" / "models" / "py_risk.joblib",
+        _REPO_ROOT / "models" / "py_risk.joblib",
+        Path("models/py_risk.joblib"),
+        Path("ml/models/py_risk.joblib"),
+        Path("/app/models/py_risk.joblib"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p.resolve())
+    return str(_REPO_ROOT / "models" / "py_risk.joblib")
+
+
+DEFAULT_MODEL_PATH = get_default_model_path()
 
 _lock = threading.Lock()
 _cache: dict = {"path": None, "bundle": None, "error": None}
@@ -30,7 +51,7 @@ def load_model(path: Optional[str] = None, *, force: bool = False):
 
     SECURITY: joblib is pickle. Only load model files your own training job produced.
     """
-    path = path or DEFAULT_MODEL_PATH
+    path = path or get_default_model_path()
     with _lock:
         if not force and _cache["path"] == path and (_cache["bundle"] or _cache["error"]):
             return _cache["bundle"]

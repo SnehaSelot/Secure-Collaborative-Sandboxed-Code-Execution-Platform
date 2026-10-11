@@ -1,4 +1,4 @@
-﻿"""
+"""
 Shared configuration constants for the execution service.
 
 All tuneable values live here so that routers, services, and core modules
@@ -11,6 +11,7 @@ Environment variables are read via pydantic-settings.  Copy .env.example to
 import logging
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("exec-service")
@@ -79,6 +80,31 @@ class Settings(BaseSettings):
     COLLAB_SNAPSHOT_INTERVAL: float = 30.0
 
     # -----------------------------------------------------------------------
+    # Risk analysis (GlassHouse)
+    # -----------------------------------------------------------------------
+    # Master switch. When False, the gate is skipped entirely (dev/test only;
+    # startup logs a loud warning, and refuses in production).
+    RISK_ENABLED: bool = True
+    # Path to the trained Python classifier bundle. Relative paths are
+    # resolved against the service working directory, so prefer an absolute
+    # path (or set it in .env) when running under Docker / a process manager.
+    RISK_MODEL_PATH: str = Field(
+        default_factory=lambda: __import__("risk.engine", fromlist=["get_default_model_path"]).get_default_model_path()
+    )
+    # Static fallback thresholds (0-100 scale). The analyzer may override
+    # these from system_settings (risk_flag_threshold / risk_block_threshold);
+    # these values are used when the DB lookup fails or has no row.
+    RISK_FLAG_THRESHOLD: int = 40
+    RISK_BLOCK_THRESHOLD: int = 80
+    # How long (seconds) DB-loaded thresholds are cached before re-reading.
+    RISK_THRESHOLD_CACHE_TTL: float = 30.0
+    # What to do if the risk engine itself raises unexpectedly (NOT a model
+    # failure — a missing/corrupt model always falls back to rules-only).
+    #   True  -> reject the execution (fail-closed, recommended)
+    #   False -> allow it through and write an audit log (fail-open)
+    RISK_FAIL_CLOSED: bool = True
+
+    # -----------------------------------------------------------------------
     # Thread-pool sizes
     # -----------------------------------------------------------------------
     EXECUTOR_POOL_MAX_WORKERS: int = 16
@@ -87,7 +113,7 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     # Orphan reaper settings
     # -----------------------------------------------------------------------
-    REAP_INTERVAL: int = 30       # seconds between sweeps
+    REAP_INTERVAL: int = 30  # seconds between sweeps
     MAX_CONTAINER_AGE: int = 120  # 2x the longest per-language timeout (Go/Rust = 60 s)
 
     # -----------------------------------------------------------------------
@@ -98,7 +124,7 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     # Collaboration (Yjs) WebSocket settings
     # -----------------------------------------------------------------------
-    COLLAB_MAX_MESSAGE_BYTES: int = 1_048_576      # 1 MiB
+    COLLAB_MAX_MESSAGE_BYTES: int = 1_048_576  # 1 MiB
     COLLAB_MAX_ROOM_CLIENTS: int = 20
     COLLAB_ROOM_IDLE_SECONDS: float = 60.0
     COLLAB_CLIENT_QUEUE_MAXSIZE: int = 256
@@ -132,6 +158,31 @@ def validate_startup_config(s: Settings | None = None) -> None:
                 "This is permitted only in non-production environments."
             )
 
+    # --- Risk analysis config ------------------------------------------------
+    flag_t = settings.RISK_FLAG_THRESHOLD
+    block_t = settings.RISK_BLOCK_THRESHOLD
+    if not (0 <= flag_t < block_t <= 100):
+        raise RuntimeError(
+            "Invalid risk thresholds: require 0 <= RISK_FLAG_THRESHOLD < "
+            f"RISK_BLOCK_THRESHOLD <= 100 (got flag={flag_t}, block={block_t})."
+        )
+
+    if not settings.RISK_ENABLED:
+        if settings.ENV.lower() == "production":
+            raise RuntimeError(
+                "Refusing to start in production with RISK_ENABLED=false: "
+                "code would execute without risk analysis."
+            )
+        logger.warning(
+            "RISK_ENABLED is false: execution paths will NOT run risk analysis. "
+            "This is permitted only in non-production environments."
+        )
+    elif not settings.RISK_FAIL_CLOSED:
+        logger.warning(
+            "RISK_FAIL_CLOSED is false: an unexpected risk-engine error will "
+            "allow execution through (audit-logged)."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Module-level aliases so existing imports continue to work unchanged.
@@ -146,6 +197,10 @@ CLEANUP_POOL_MAX_WORKERS: int = settings.CLEANUP_POOL_MAX_WORKERS
 _REAP_INTERVAL: int = settings.REAP_INTERVAL
 _MAX_CONTAINER_AGE: int = settings.MAX_CONTAINER_AGE
 _WS_QUEUE_MAXSIZE: int = settings.WS_QUEUE_MAXSIZE
+
+RISK_ENABLED: bool = settings.RISK_ENABLED
+RISK_MODEL_PATH: str = settings.RISK_MODEL_PATH
+RISK_FAIL_CLOSED: bool = settings.RISK_FAIL_CLOSED
 
 COLLAB_MAX_MESSAGE_BYTES: int = settings.COLLAB_MAX_MESSAGE_BYTES
 COLLAB_MAX_ROOM_CLIENTS: int = settings.COLLAB_MAX_ROOM_CLIENTS

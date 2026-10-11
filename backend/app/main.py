@@ -8,6 +8,7 @@ Routes live in app/routers/, shared state in app/core/, tuneables in app/config.
     POST /execute                        run code synchronously   (routers/execute.py)
     GET  /health /languages /limits                               (routers/execute.py)
     WS   /ws/execute                     streaming execution      (routers/ws_execute.py)
+    POST /risk/analyze                   on-demand risk analysis  (routers/risk_router.py)
     WS   /ws/collab/{room}               Yjs collaboration        (routers/ws_collab.py)
     POST /sessions                       create a session         (routers/collab_rooms.py)
     GET  /sessions/{id}                  session info             (routers/collab_rooms.py)
@@ -21,8 +22,13 @@ Routes live in app/routers/, shared state in app/core/, tuneables in app/config.
     PATCH /sessions/{id}/files/{fid}     rename file              (routers/collab_files.py)
     DELETE /sessions/{id}/files/{fid}    delete file              (routers/collab_files.py)
     GET  /collab/stats                   admin-only stats         (main.py, B6)
+
+Risk analysis: POST /execute and WS /ws/execute both pass through the shared
+gate in risk/analyzer.py before any container is created.  The model is warmed
+in lifespan; if it is missing the engine runs rules-only.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -38,11 +44,13 @@ from app.routers import (
     collab_files,
     collab_rooms,
     execute,
+    risk_router,
     ws_collab,
     ws_execute,
 )
 from app.routers.ws_collab import DbStateStore, set_state_store
 from app.services.reaper import start_reaper, stop_reaper
+from risk.analyzer import warm_up as risk_warm_up
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("exec-service")
@@ -71,6 +79,24 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Collab persistence disabled (InMemoryStateStore)")
 
+    # Warm the risk model so the first execution doesn't pay the load cost.
+    # joblib loading is blocking I/O, so keep it off the event loop. A missing
+    # or corrupt model is NOT fatal: the engine falls back to rules-only.
+    if settings.RISK_ENABLED:
+        try:
+            info = await asyncio.to_thread(risk_warm_up)
+            if info.get("model_loaded"):
+                logger.info("Risk model loaded (%s)", settings.RISK_MODEL_PATH)
+            else:
+                logger.warning(
+                    "Risk model not loaded — rules-only mode (reason: %s)",
+                    info.get("fallback_reason"),
+                )
+        except Exception:
+            logger.exception("Risk warm-up failed — continuing in rules-only mode")
+    else:
+        logger.warning("Risk analysis disabled (RISK_ENABLED=false)")
+
     await start_reaper()
     yield
     await stop_reaper()
@@ -92,6 +118,7 @@ app.include_router(auth_router.router)
 app.include_router(collab_rooms.router)
 app.include_router(collab_files.router)
 app.include_router(execute.router)
+app.include_router(risk_router.router)
 app.include_router(ws_execute.router)
 app.include_router(ws_collab.router)
 

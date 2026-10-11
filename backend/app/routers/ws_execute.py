@@ -15,6 +15,12 @@ Message protocol (server → client):
   {"type": "stdout_truncated"}          — emitted once when stdout limit hit
   {"type": "stderr_truncated"}          — emitted once when stderr limit hit
   {"type": "error",           "message": "..."}   — validation / setup error
+  {"type": "error",           "reason": "blocked" | "risk_unavailable",
+                              "message": "...", "risk": {...}}
+                                              — risk gate refused; nothing ran,
+                                                socket is closed after this
+  {"type": "risk",            "risk": {...}}  — code was flagged; execution
+                                                proceeds, sent before any output
   {"type": "result",          "exit_code": int|null,
                               "status": "success"|"error"|"timeout"|"internal_error",
                               "execution_time": float}
@@ -37,6 +43,7 @@ from app.services.executor import (
     ContainerHolder,
 )
 from app.services.sandbox_control import kill_container
+from risk.analyzer import assess_and_record
 
 logger = logging.getLogger("exec-service")
 
@@ -116,6 +123,33 @@ async def ws_execute(websocket: WebSocket):
             {"type": "error", "message": f"stdin exceeds {MAX_STDIN_CHARS} characters"}
         )
         await websocket.close()
+        return
+
+    # --- 3b. Risk gate --------------------------------------------------------
+    # Same shared gate as POST /execute (risk.analyzer): all policy lives
+    # there; this handler only maps the decision onto WS messages.  It runs
+    # BEFORE the queue, ContainerHolder and worker exist, so blocked code
+    # never reaches _executor_pool or Docker.  assess_and_record() never raises.
+    decision = await assess_and_record(code, language)
+    try:
+        if decision.blocked:
+            unavailable = bool(decision.error)
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "reason": "risk_unavailable" if unavailable else "blocked",
+                    "message": decision.summary,
+                    "risk": decision.to_dict(),
+                }
+            )
+            await websocket.close()
+            return
+        if decision.decision == "flag":
+            # Informational: execution continues.  Sent first so the UI can
+            # show the warning before any output arrives.
+            await websocket.send_json({"type": "risk", "risk": decision.to_dict()})
+    except WebSocketDisconnect:
+        # Client left during the gate; nothing has been started yet.
         return
 
     # --- 4. Set up queue and container holder --------------------------------
