@@ -1,4 +1,4 @@
-﻿"""
+"""
 app/db.py — Async SQLAlchemy engine and database helpers.
 
 Uses the existing PostgreSQL schema (sessions, session_participants, users,
@@ -16,15 +16,14 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
 
 logger = logging.getLogger("exec-service")
 
 _engine: AsyncEngine | None = None
-_async_session: sessionmaker | None = None
+_async_session: async_sessionmaker[AsyncSession] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -46,12 +45,11 @@ def get_engine() -> AsyncEngine:
     return _engine
 
 
-def get_session_factory() -> sessionmaker:
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
     global _async_session
     if _async_session is None:
-        _async_session = sessionmaker(
-            get_engine(),
-            class_=AsyncSession,
+        _async_session = async_sessionmaker(
+            bind=get_engine(),
             expire_on_commit=False,
         )
     return _async_session
@@ -199,7 +197,13 @@ async def get_session(session_id: str) -> dict | None:
         r = row.fetchone()
         if r is None:
             return None
-        return dict(r._mapping)
+        row_dict = dict(r._mapping)
+        # asyncpg/SQLAlchemy returns UUID columns as uuid.UUID objects.
+        # Normalise to str so callers (Pydantic models, comparisons) work
+        # consistently without requiring Pydantic v2 coercion mode.
+        row_dict["id"] = str(row_dict["id"])
+        row_dict["owner_id"] = str(row_dict["owner_id"])
+        return row_dict
 
 
 async def touch_session(session_id: str) -> None:

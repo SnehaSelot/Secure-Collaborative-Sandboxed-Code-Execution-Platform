@@ -24,7 +24,6 @@ from app.auth import CollabUser, create_access_token
 from app.config import get_settings
 from app.routers import ws_collab
 
-
 # ---------------------------------------------------------------------------
 # Override settings for tests  (no real DB, relaxed secrets)
 # ---------------------------------------------------------------------------
@@ -136,8 +135,13 @@ def _active_file() -> dict:
 def mock_db_authorized():
     """Patch DB so OWNER_ID is authorized for SESSION_ID:FILE_ID."""
     with (
-        patch("app.routers.ws_collab.get_session", new=AsyncMock(return_value=_active_session())),
-        patch("app.routers.ws_collab.get_file", new=AsyncMock(return_value=_active_file())),
+        patch(
+            "app.routers.ws_collab.get_session",
+            new=AsyncMock(return_value=_active_session()),
+        ),
+        patch(
+            "app.routers.ws_collab.get_file", new=AsyncMock(return_value=_active_file())
+        ),
         patch("app.routers.ws_collab.is_participant", new=AsyncMock(return_value=True)),
         patch("app.routers.ws_collab.touch_session", new=AsyncMock()),
     ):
@@ -148,9 +152,16 @@ def mock_db_authorized():
 def mock_db_not_participant():
     """Patch DB so the caller is NOT a participant."""
     with (
-        patch("app.routers.ws_collab.get_session", new=AsyncMock(return_value=_active_session())),
-        patch("app.routers.ws_collab.get_file", new=AsyncMock(return_value=_active_file())),
-        patch("app.routers.ws_collab.is_participant", new=AsyncMock(return_value=False)),
+        patch(
+            "app.routers.ws_collab.get_session",
+            new=AsyncMock(return_value=_active_session()),
+        ),
+        patch(
+            "app.routers.ws_collab.get_file", new=AsyncMock(return_value=_active_file())
+        ),
+        patch(
+            "app.routers.ws_collab.is_participant", new=AsyncMock(return_value=False)
+        ),
         patch("app.routers.ws_collab.touch_session", new=AsyncMock()),
     ):
         yield
@@ -161,7 +172,9 @@ def mock_db_session_not_found():
     with (
         patch("app.routers.ws_collab.get_session", new=AsyncMock(return_value=None)),
         patch("app.routers.ws_collab.get_file", new=AsyncMock(return_value=None)),
-        patch("app.routers.ws_collab.is_participant", new=AsyncMock(return_value=False)),
+        patch(
+            "app.routers.ws_collab.is_participant", new=AsyncMock(return_value=False)
+        ),
         patch("app.routers.ws_collab.touch_session", new=AsyncMock()),
     ):
         yield
@@ -172,7 +185,9 @@ def mock_db_session_closed():
     closed = {**_active_session(), "status": "closed"}
     with (
         patch("app.routers.ws_collab.get_session", new=AsyncMock(return_value=closed)),
-        patch("app.routers.ws_collab.get_file", new=AsyncMock(return_value=_active_file())),
+        patch(
+            "app.routers.ws_collab.get_file", new=AsyncMock(return_value=_active_file())
+        ),
         patch("app.routers.ws_collab.is_participant", new=AsyncMock(return_value=True)),
         patch("app.routers.ws_collab.touch_session", new=AsyncMock()),
     ):
@@ -187,8 +202,12 @@ def mock_db_session_hibernated():
         "hibernated_at": datetime.now(timezone.utc),
     }
     with (
-        patch("app.routers.ws_collab.get_session", new=AsyncMock(return_value=hibernated)),
-        patch("app.routers.ws_collab.get_file", new=AsyncMock(return_value=_active_file())),
+        patch(
+            "app.routers.ws_collab.get_session", new=AsyncMock(return_value=hibernated)
+        ),
+        patch(
+            "app.routers.ws_collab.get_file", new=AsyncMock(return_value=_active_file())
+        ),
         patch("app.routers.ws_collab.is_participant", new=AsyncMock(return_value=True)),
         patch("app.routers.ws_collab.wake_session", new=AsyncMock()) as mock_wake,
         patch("app.routers.ws_collab.touch_session", new=AsyncMock()),

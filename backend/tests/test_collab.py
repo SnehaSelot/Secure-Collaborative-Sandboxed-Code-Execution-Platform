@@ -32,7 +32,6 @@ from tests.conftest import (
     make_token,
 )
 
-
 # ===========================================================================
 # Helpers
 # ===========================================================================
@@ -105,9 +104,7 @@ class TestWebSocketAuth:
 
     def test_invalid_token_rejected(self, client, mock_db_authorized):
         with pytest.raises(Exception):
-            with client.websocket_connect(
-                _ws_url() + f"?token={_bad_token()}"
-            ) as ws:
+            with client.websocket_connect(_ws_url() + f"?token={_bad_token()}") as ws:
                 ws.receive_bytes()
 
     def test_valid_token_accepted(self, client, mock_db_authorized):
@@ -129,11 +126,11 @@ class TestWebSocketAuth:
             "name": "Owner",
             "exp": datetime(2000, 1, 1, tzinfo=timezone.utc),
         }
-        expired_token = jwt.encode(payload, settings.COLLAB_JWT_SECRET, algorithm="HS256")
+        expired_token = jwt.encode(
+            payload, settings.COLLAB_JWT_SECRET, algorithm="HS256"
+        )
         with pytest.raises(Exception):
-            with client.websocket_connect(
-                _ws_url() + f"?token={expired_token}"
-            ) as ws:
+            with client.websocket_connect(_ws_url() + f"?token={expired_token}") as ws:
                 ws.receive_bytes()
 
 
@@ -181,7 +178,9 @@ class TestRoomAuthorization:
             ) as ws:
                 ws.receive_bytes()
 
-    def test_hibernated_session_wakes_on_connect(self, client, mock_db_session_hibernated):
+    def test_hibernated_session_wakes_on_connect(
+        self, client, mock_db_session_hibernated
+    ):
         token = _owner_token()
         with client.websocket_connect(
             _ws_url() + f"?token={token}",
@@ -408,7 +407,9 @@ class TestCollabStats:
 class TestSecurityAndConfig:
     def test_production_jwt_secret_validation(self):
         # Default placeholder in production must raise RuntimeError
-        bad_settings = Settings(ENV="production", COLLAB_JWT_SECRET="change-me-before-production")
+        bad_settings = Settings(
+            ENV="production", COLLAB_JWT_SECRET="change-me-before-production"
+        )
         with pytest.raises(RuntimeError):
             validate_startup_config(bad_settings)
 
@@ -471,7 +472,11 @@ class TestAuthAndPasswords:
         long_pwd = "a" * 73
         resp = client.post(
             "/auth/signup",
-            json={"email": "test@example.com", "display_name": "Test", "password": long_pwd},
+            json={
+                "email": "test@example.com",
+                "display_name": "Test",
+                "password": long_pwd,
+            },
         )
         assert resp.status_code == 422
 
@@ -479,7 +484,11 @@ class TestAuthAndPasswords:
         # < 8 chars must return 422
         resp = client.post(
             "/auth/signup",
-            json={"email": "test@example.com", "display_name": "Test", "password": "short"},
+            json={
+                "email": "test@example.com",
+                "display_name": "Test",
+                "password": "short",
+            },
         )
         assert resp.status_code == 422
 
@@ -491,12 +500,22 @@ class TestAuthAndPasswords:
             "password_hash": "$2b$12$...",
         }
         with (
-            patch("app.routers.auth_router.get_user_by_email", new=AsyncMock(return_value=None)) as mock_get,
-            patch("app.routers.auth_router.create_user", new=AsyncMock(return_value=dummy_user)) as mock_create,
+            patch(
+                "app.routers.auth_router.get_user_by_email",
+                new=AsyncMock(return_value=None),
+            ) as mock_get,
+            patch(
+                "app.routers.auth_router.create_user",
+                new=AsyncMock(return_value=dummy_user),
+            ) as mock_create,
         ):
             resp = client.post(
                 "/auth/signup",
-                json={"email": "UsEr@ExAmPlE.CoM", "display_name": "User", "password": "password123"},
+                json={
+                    "email": "UsEr@ExAmPlE.CoM",
+                    "display_name": "User",
+                    "password": "password123",
+                },
             )
             assert resp.status_code == 201
             mock_get.assert_called_with("user@example.com")
@@ -518,11 +537,19 @@ class TestSessionLifecycleAndIdempotency:
             "status": "hibernated",
         }
         with (
-            patch("app.routers.collab_rooms.get_session", new=AsyncMock(return_value=session_data)),
-            patch("app.routers.collab_rooms.wake_session", new=AsyncMock()) as mock_wake,
+            patch(
+                "app.routers.collab_rooms.get_session",
+                new=AsyncMock(return_value=session_data),
+            ),
+            patch(
+                "app.routers.collab_rooms.wake_session", new=AsyncMock()
+            ) as mock_wake,
             patch("app.routers.collab_rooms.join_session", new=AsyncMock()),
         ):
-            resp = client.post(f"/sessions/{SESSION_ID}/join", headers={"Authorization": f"Bearer {token}"})
+            resp = client.post(
+                f"/sessions/{SESSION_ID}/join",
+                headers={"Authorization": f"Bearer {token}"},
+            )
             assert resp.status_code == 200
             mock_wake.assert_called_once_with(SESSION_ID)
 
@@ -534,8 +561,14 @@ class TestSessionLifecycleAndIdempotency:
             "name": "Collab Session",
             "status": "closed",
         }
-        with patch("app.routers.collab_rooms.get_session", new=AsyncMock(return_value=session_data)):
-            resp = client.post(f"/sessions/{SESSION_ID}/join", headers={"Authorization": f"Bearer {token}"})
+        with patch(
+            "app.routers.collab_rooms.get_session",
+            new=AsyncMock(return_value=session_data),
+        ):
+            resp = client.post(
+                f"/sessions/{SESSION_ID}/join",
+                headers={"Authorization": f"Bearer {token}"},
+            )
             assert resp.status_code == 409
 
     def test_join_session_idempotent(self, client):
@@ -547,14 +580,234 @@ class TestSessionLifecycleAndIdempotency:
             "status": "active",
         }
         with (
-            patch("app.routers.collab_rooms.get_session", new=AsyncMock(return_value=session_data)),
-            patch("app.routers.collab_rooms.join_session", new=AsyncMock()) as mock_join,
+            patch(
+                "app.routers.collab_rooms.get_session",
+                new=AsyncMock(return_value=session_data),
+            ),
+            patch(
+                "app.routers.collab_rooms.join_session", new=AsyncMock()
+            ) as mock_join,
         ):
-            resp1 = client.post(f"/sessions/{SESSION_ID}/join", headers={"Authorization": f"Bearer {token}"})
-            resp2 = client.post(f"/sessions/{SESSION_ID}/join", headers={"Authorization": f"Bearer {token}"})
+            resp1 = client.post(
+                f"/sessions/{SESSION_ID}/join",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp2 = client.post(
+                f"/sessions/{SESSION_ID}/join",
+                headers={"Authorization": f"Bearer {token}"},
+            )
             assert resp1.status_code == 200
             assert resp2.status_code == 200
             assert mock_join.call_count == 2
+
+
+# ===========================================================================
+# GET /sessions/{session_id} — regression tests for UUID/str coercion bug
+# ===========================================================================
+
+
+class TestGetSessionEndpoint:
+    """
+    Regression suite for the HTTP 500 caused by asyncpg returning uuid.UUID
+    objects for the sessions.id and sessions.owner_id columns while
+    SessionResponse declared those fields as ``str``.
+
+    Under Pydantic v2 the assignment triggers a ValidationError unless the
+    values are normalised to ``str`` before construction. The fix in
+    db.get_session() stringifies both UUID columns; these tests ensure:
+
+    * An authenticated member receives 200 with the correct JSON structure.
+    * session_id and owner_id in the response are valid UUID strings.
+    * The returned data matches the stored session record.
+    * Injecting raw uuid.UUID objects (simulating asyncpg) does NOT produce a
+      500 — this directly reproduces the original bug.
+    * Unknown sessions return 404.
+    * Non-members receive 403.
+    * Unauthenticated requests receive 401.
+    """
+
+    # ------------------------------------------------------------------
+    # Happy-path: string IDs (as returned after the fix)
+    # ------------------------------------------------------------------
+
+    def test_owner_can_retrieve_session(self, client):
+        """Owner is always a participant; GET returns 200 with all fields."""
+        token = _owner_token()
+        session_data = {
+            "id": SESSION_ID,
+            "owner_id": OWNER_ID,
+            "name": "My Session",
+            "status": "active",
+        }
+        with (
+            patch(
+                "app.routers.collab_rooms.get_session",
+                new=AsyncMock(return_value=session_data),
+            ),
+            patch(
+                "app.routers.collab_rooms.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            resp = client.get(
+                f"/sessions/{SESSION_ID}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == SESSION_ID
+        assert body["owner_id"] == OWNER_ID
+        assert body["name"] == "My Session"
+        assert body["status"] == "active"
+
+    def test_response_session_id_is_valid_uuid_string(self, client):
+        """session_id and owner_id in the response must be valid UUID strings."""
+        token = _owner_token()
+        session_data = {
+            "id": SESSION_ID,
+            "owner_id": OWNER_ID,
+            "name": "UUID check",
+            "status": "active",
+        }
+        with (
+            patch(
+                "app.routers.collab_rooms.get_session",
+                new=AsyncMock(return_value=session_data),
+            ),
+            patch(
+                "app.routers.collab_rooms.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            resp = client.get(
+                f"/sessions/{SESSION_ID}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        # Both fields must be parseable as UUID (i.e. valid UUID strings)
+        uuid.UUID(body["session_id"])
+        uuid.UUID(body["owner_id"])
+
+    def test_returned_data_matches_stored_session(self, client):
+        """Response fields must exactly mirror the stored session record."""
+        token = _owner_token()
+        expected_name = "Collaborative Session"
+        expected_status = "hibernated"
+        session_data = {
+            "id": SESSION_ID,
+            "owner_id": OWNER_ID,
+            "name": expected_name,
+            "status": expected_status,
+        }
+        with (
+            patch(
+                "app.routers.collab_rooms.get_session",
+                new=AsyncMock(return_value=session_data),
+            ),
+            patch(
+                "app.routers.collab_rooms.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            resp = client.get(
+                f"/sessions/{SESSION_ID}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["name"] == expected_name
+        assert body["status"] == expected_status
+        assert body["session_id"] == SESSION_ID
+        assert body["owner_id"] == OWNER_ID
+
+    # ------------------------------------------------------------------
+    # Bug-regression: raw uuid.UUID objects from asyncpg must not 500
+    # ------------------------------------------------------------------
+
+    def test_uuid_objects_from_db_do_not_cause_500(self, client):
+        """
+        Directly reproduces the original bug: asyncpg returns uuid.UUID objects
+        for UUID columns. The fix in db.get_session() normalises them to str
+        before they reach the router. If the fix is absent, Pydantic v2 raises
+        a ValidationError and the endpoint returns 500.
+        """
+        token = _owner_token()
+        # Simulate the raw asyncpg/SQLAlchemy row dict with uuid.UUID values
+        session_data_with_uuids = {
+            "id": uuid.UUID(SESSION_ID),
+            "owner_id": uuid.UUID(OWNER_ID),
+            "name": "UUID Object Session",
+            "status": "active",
+        }
+        with (
+            patch(
+                "app.routers.collab_rooms.get_session",
+                new=AsyncMock(return_value=session_data_with_uuids),
+            ),
+            patch(
+                "app.routers.collab_rooms.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            resp = client.get(
+                f"/sessions/{SESSION_ID}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        # Must be 200, not 500 (which was the bug)
+        assert resp.status_code == 200
+        body = resp.json()
+        # session_id/owner_id must be serialised as strings in the JSON response
+        assert isinstance(body["session_id"], str)
+        assert isinstance(body["owner_id"], str)
+        assert body["session_id"] == SESSION_ID
+        assert body["owner_id"] == OWNER_ID
+
+    # ------------------------------------------------------------------
+    # Error cases — existing behaviour must be unchanged
+    # ------------------------------------------------------------------
+
+    def test_nonexistent_session_returns_404(self, client):
+        """GET on an unknown session_id returns 404."""
+        token = _owner_token()
+        with patch(
+            "app.routers.collab_rooms.get_session", new=AsyncMock(return_value=None)
+        ):
+            resp = client.get(
+                f"/sessions/{uuid.uuid4()}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert resp.status_code == 404
+
+    def test_non_member_returns_403(self, client):
+        """A valid user who is not a member of the session gets 403."""
+        token = _user_token()  # random non-owner user
+        session_data = {
+            "id": SESSION_ID,
+            "owner_id": OWNER_ID,
+            "name": "Private Session",
+            "status": "active",
+        }
+        with (
+            patch(
+                "app.routers.collab_rooms.get_session",
+                new=AsyncMock(return_value=session_data),
+            ),
+            patch(
+                "app.routers.collab_rooms.is_participant",
+                new=AsyncMock(return_value=False),
+            ),
+        ):
+            resp = client.get(
+                f"/sessions/{SESSION_ID}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert resp.status_code == 403
+
+    def test_unauthenticated_request_returns_401(self, client):
+        """No Bearer token → 401 before any DB calls are made."""
+        resp = client.get(f"/sessions/{SESSION_ID}")
+        assert resp.status_code == 401
 
 
 # ===========================================================================
@@ -575,17 +828,37 @@ class TestCollabFilesEndpoints:
             "updated_at": datetime.now(timezone.utc),
         }
         with (
-            patch("app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)),
-            patch("app.routers.collab_files.is_participant", new=AsyncMock(return_value=True)),
-            patch("app.routers.collab_files.get_language_by_name", new=AsyncMock(return_value={"id": 1, "name": "python"})),
-            patch("app.routers.collab_files.get_file_by_path", new=AsyncMock(return_value=None)),
-            patch("app.routers.collab_files.create_file", new=AsyncMock(return_value=file_data)),
-            patch("app.routers.collab_files.write_audit_log", new=AsyncMock()) as mock_audit,
+            patch(
+                "app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)
+            ),
+            patch(
+                "app.routers.collab_files.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "app.routers.collab_files.get_language_by_name",
+                new=AsyncMock(return_value={"id": 1, "name": "python"}),
+            ),
+            patch(
+                "app.routers.collab_files.get_file_by_path",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.routers.collab_files.create_file",
+                new=AsyncMock(return_value=file_data),
+            ),
+            patch(
+                "app.routers.collab_files.write_audit_log", new=AsyncMock()
+            ) as mock_audit,
         ):
             resp = client.post(
                 f"/sessions/{SESSION_ID}/files",
                 headers={"Authorization": f"Bearer {token}"},
-                json={"path": "src/main.py", "language": "python", "content": "print('hello')"},
+                json={
+                    "path": "src/main.py",
+                    "language": "python",
+                    "content": "print('hello')",
+                },
             )
             assert resp.status_code == 201
             body = resp.json()
@@ -597,10 +870,21 @@ class TestCollabFilesEndpoints:
     def test_create_file_path_validation(self, client):
         token = _owner_token()
         sess = {"id": SESSION_ID, "owner_id": OWNER_ID, "status": "active"}
-        invalid_paths = ["", "/leading/slash.py", "../escape.py", "back\\slash.py", "null\0byte.py"]
+        invalid_paths = [
+            "",
+            "/leading/slash.py",
+            "../escape.py",
+            "back\\slash.py",
+            "null\0byte.py",
+        ]
         with (
-            patch("app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)),
-            patch("app.routers.collab_files.is_participant", new=AsyncMock(return_value=True)),
+            patch(
+                "app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)
+            ),
+            patch(
+                "app.routers.collab_files.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
         ):
             for p in invalid_paths:
                 resp = client.post(
@@ -614,9 +898,17 @@ class TestCollabFilesEndpoints:
         token = _owner_token()
         sess = {"id": SESSION_ID, "owner_id": OWNER_ID, "status": "active"}
         with (
-            patch("app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)),
-            patch("app.routers.collab_files.is_participant", new=AsyncMock(return_value=True)),
-            patch("app.routers.collab_files.get_language_by_name", new=AsyncMock(return_value=None)),
+            patch(
+                "app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)
+            ),
+            patch(
+                "app.routers.collab_files.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "app.routers.collab_files.get_language_by_name",
+                new=AsyncMock(return_value=None),
+            ),
         ):
             resp = client.post(
                 f"/sessions/{SESSION_ID}/files",
@@ -630,9 +922,17 @@ class TestCollabFilesEndpoints:
         sess = {"id": SESSION_ID, "owner_id": OWNER_ID, "status": "active"}
         existing_file = {"id": FILE_ID, "path": "main.py"}
         with (
-            patch("app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)),
-            patch("app.routers.collab_files.is_participant", new=AsyncMock(return_value=True)),
-            patch("app.routers.collab_files.get_file_by_path", new=AsyncMock(return_value=existing_file)),
+            patch(
+                "app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)
+            ),
+            patch(
+                "app.routers.collab_files.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "app.routers.collab_files.get_file_by_path",
+                new=AsyncMock(return_value=existing_file),
+            ),
         ):
             resp = client.post(
                 f"/sessions/{SESSION_ID}/files",
@@ -645,14 +945,31 @@ class TestCollabFilesEndpoints:
         token = _owner_token()
         sess = {"id": SESSION_ID, "owner_id": OWNER_ID, "status": "active"}
         files_data = [
-            {"id": FILE_ID, "session_id": SESSION_ID, "path": "main.py", "language": "python", "updated_at": datetime.now(timezone.utc)}
+            {
+                "id": FILE_ID,
+                "session_id": SESSION_ID,
+                "path": "main.py",
+                "language": "python",
+                "updated_at": datetime.now(timezone.utc),
+            }
         ]
         with (
-            patch("app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)),
-            patch("app.routers.collab_files.is_participant", new=AsyncMock(return_value=True)),
-            patch("app.routers.collab_files.list_files", new=AsyncMock(return_value=files_data)),
+            patch(
+                "app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)
+            ),
+            patch(
+                "app.routers.collab_files.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "app.routers.collab_files.list_files",
+                new=AsyncMock(return_value=files_data),
+            ),
         ):
-            resp = client.get(f"/sessions/{SESSION_ID}/files", headers={"Authorization": f"Bearer {token}"})
+            resp = client.get(
+                f"/sessions/{SESSION_ID}/files",
+                headers={"Authorization": f"Bearer {token}"},
+            )
             assert resp.status_code == 200
             items = resp.json()
             assert len(items) == 1
@@ -671,11 +988,22 @@ class TestCollabFilesEndpoints:
             "updated_at": datetime.now(timezone.utc),
         }
         with (
-            patch("app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)),
-            patch("app.routers.collab_files.is_participant", new=AsyncMock(return_value=True)),
-            patch("app.routers.collab_files.get_file", new=AsyncMock(return_value=file_data)),
+            patch(
+                "app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)
+            ),
+            patch(
+                "app.routers.collab_files.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "app.routers.collab_files.get_file",
+                new=AsyncMock(return_value=file_data),
+            ),
         ):
-            resp = client.get(f"/sessions/{SESSION_ID}/files/{FILE_ID}", headers={"Authorization": f"Bearer {token}"})
+            resp = client.get(
+                f"/sessions/{SESSION_ID}/files/{FILE_ID}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
             assert resp.status_code == 200
             body = resp.json()
             assert body["content"] == "code here"
@@ -686,11 +1014,21 @@ class TestCollabFilesEndpoints:
         sess = {"id": SESSION_ID, "owner_id": OWNER_ID, "status": "active"}
         # get_file returns None when session_id doesn't match
         with (
-            patch("app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)),
-            patch("app.routers.collab_files.is_participant", new=AsyncMock(return_value=True)),
-            patch("app.routers.collab_files.get_file", new=AsyncMock(return_value=None)),
+            patch(
+                "app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)
+            ),
+            patch(
+                "app.routers.collab_files.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "app.routers.collab_files.get_file", new=AsyncMock(return_value=None)
+            ),
         ):
-            resp = client.get(f"/sessions/{SESSION_ID}/files/{FILE_ID}", headers={"Authorization": f"Bearer {token}"})
+            resp = client.get(
+                f"/sessions/{SESSION_ID}/files/{FILE_ID}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
             assert resp.status_code == 404
 
     def test_rename_file(self, client):
@@ -705,12 +1043,28 @@ class TestCollabFilesEndpoints:
         }
         renamed_data = {**file_data, "path": "new.py"}
         with (
-            patch("app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)),
-            patch("app.routers.collab_files.is_participant", new=AsyncMock(return_value=True)),
-            patch("app.routers.collab_files.get_file", new=AsyncMock(return_value=file_data)),
-            patch("app.routers.collab_files.get_file_by_path", new=AsyncMock(return_value=None)),
-            patch("app.routers.collab_files.update_file_path", new=AsyncMock(return_value=renamed_data)),
-            patch("app.routers.collab_files.write_audit_log", new=AsyncMock()) as mock_audit,
+            patch(
+                "app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)
+            ),
+            patch(
+                "app.routers.collab_files.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "app.routers.collab_files.get_file",
+                new=AsyncMock(return_value=file_data),
+            ),
+            patch(
+                "app.routers.collab_files.get_file_by_path",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.routers.collab_files.update_file_path",
+                new=AsyncMock(return_value=renamed_data),
+            ),
+            patch(
+                "app.routers.collab_files.write_audit_log", new=AsyncMock()
+            ) as mock_audit,
         ):
             resp = client.patch(
                 f"/sessions/{SESSION_ID}/files/{FILE_ID}",
@@ -729,12 +1083,24 @@ class TestCollabFilesEndpoints:
         file_data = {"id": FILE_ID, "session_id": SESSION_ID, "path": "del.py"}
 
         with (
-            patch("app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)),
-            patch("app.routers.collab_files.is_participant", new=AsyncMock(return_value=True)),
-            patch("app.routers.collab_files.get_file", new=AsyncMock(return_value=file_data)),
-            patch("app.routers.collab_files.close_room_for_file", new=AsyncMock()) as mock_close,
+            patch(
+                "app.routers.collab_files.get_session", new=AsyncMock(return_value=sess)
+            ),
+            patch(
+                "app.routers.collab_files.is_participant",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "app.routers.collab_files.get_file",
+                new=AsyncMock(return_value=file_data),
+            ),
+            patch(
+                "app.routers.collab_files.close_room_for_file", new=AsyncMock()
+            ) as mock_close,
             patch("app.routers.collab_files.delete_file", new=AsyncMock()) as mock_del,
-            patch("app.routers.collab_files.write_audit_log", new=AsyncMock()) as mock_audit,
+            patch(
+                "app.routers.collab_files.write_audit_log", new=AsyncMock()
+            ) as mock_audit,
         ):
             # Non-owner gets 403
             resp = client.delete(
@@ -749,7 +1115,9 @@ class TestCollabFilesEndpoints:
                 headers={"Authorization": f"Bearer {token_owner}"},
             )
             assert resp.status_code == 200
-            mock_close.assert_called_once_with(FILE_ID, code=4404, reason="File deleted")
+            mock_close.assert_called_once_with(
+                FILE_ID, code=4404, reason="File deleted"
+            )
             mock_del.assert_called_once_with(SESSION_ID, FILE_ID)
             mock_audit.assert_called_once()
             assert mock_audit.call_args[1]["action"] == "file.delete"
