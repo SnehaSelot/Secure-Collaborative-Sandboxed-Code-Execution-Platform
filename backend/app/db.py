@@ -16,7 +16,12 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.config import get_settings
 
@@ -107,9 +112,7 @@ async def get_user_by_id(user_id: str) -> dict | None:
     factory = get_session_factory()
     async with factory() as session:
         row = await session.execute(
-            text(
-                "SELECT id, email, display_name FROM users WHERE id = :id"
-            ),
+            text("SELECT id, email, display_name FROM users WHERE id = :id"),
             {"id": user_id},
         )
         r = row.fetchone()
@@ -211,9 +214,7 @@ async def touch_session(session_id: str) -> None:
     factory = get_session_factory()
     async with factory() as session:
         await session.execute(
-            text(
-                "UPDATE sessions SET last_active_at = :now WHERE id = :id"
-            ),
+            text("UPDATE sessions SET last_active_at = :now WHERE id = :id"),
             {"id": session_id, "now": datetime.now(timezone.utc)},
         )
         await session.commit()
@@ -237,9 +238,9 @@ async def set_session_status(session_id: str, status_val: str) -> None:
     factory = get_session_factory()
     async with factory() as session:
         col = (
-            "closed_at = :ts, " if status_val == "closed"
-            else "hibernated_at = :ts, " if status_val == "hibernated"
-            else ""
+            "closed_at = :ts, "
+            if status_val == "closed"
+            else "hibernated_at = :ts, " if status_val == "hibernated" else ""
         )
         await session.execute(
             text(
@@ -387,9 +388,7 @@ async def get_file_by_id_only(file_id: str) -> dict | None:
     factory = get_session_factory()
     async with factory() as session:
         row = await session.execute(
-            text(
-                "SELECT id, session_id, path FROM files WHERE id = :id"
-            ),
+            text("SELECT id, session_id, path FROM files WHERE id = :id"),
             {"id": file_id},
         )
         r = row.fetchone()
@@ -475,16 +474,14 @@ async def update_file_path(session_id: str, file_id: str, new_path: str) -> dict
             {"id": file_id, "session_id": session_id, "new_path": new_path, "now": now},
         )
         await session.commit()
-    return await get_file(session_id, file_id) # type: ignore
+    return await get_file(session_id, file_id)  # type: ignore
 
 
 async def delete_file(session_id: str, file_id: str) -> None:
     factory = get_session_factory()
     async with factory() as session:
         await session.execute(
-            text(
-                "DELETE FROM files WHERE id = :id AND session_id = :session_id"
-            ),
+            text("DELETE FROM files WHERE id = :id AND session_id = :session_id"),
             {"id": file_id, "session_id": session_id},
         )
         await session.commit()
