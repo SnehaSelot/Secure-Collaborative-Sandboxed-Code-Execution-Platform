@@ -213,6 +213,10 @@ def result_of(msgs: list[dict]) -> dict | None:
     return next((m for m in msgs if m.get("type") == "result"), None)
 
 
+def error_of(msgs: list[dict]) -> dict | None:
+    return next((m for m in msgs if m.get("type") == "error"), None)
+
+
 def assert_no_orphan_containers():
     """Fail the test if any sandbox-labelled containers still exist."""
     client = docker.from_env()
@@ -955,7 +959,7 @@ class TestNetworkIsolation:
     """TEST-41 through TEST-43."""
 
     def test_41_http_request_blocked(self):
-        """TEST-41: urllib.request.urlopen fails -- network_disabled=True."""
+        """TEST-41: urllib.request.urlopen fails -- blocked by risk gate or network_disabled=True."""
         msgs, _ = ws_execute(
             "python",
             "import urllib.request\n"
@@ -966,7 +970,13 @@ class TestNetworkIsolation:
             "    print('blocked:', type(e).__name__)\n",
         )
         assert "CONNECTED" not in stdout_of(msgs)
-        assert "blocked" in stdout_of(msgs)
+        err = error_of(msgs)
+        if err and err.get("reason") == "blocked":
+            # Successfully blocked upfront by the pre-execution risk analysis gate
+            assert err.get("risk", {}).get("decision") == "block"
+        else:
+            # Blocked at runtime by container network isolation
+            assert "blocked" in stdout_of(msgs)
 
     def test_42_raw_socket_blocked(self):
         """TEST-42: socket.connect to 8.8.8.8:53 fails."""
@@ -1203,9 +1213,9 @@ class TestInputValidation:
             json={"language": "python", "code": "print(1)", "stdin": oversized_stdin},
             timeout=10,
         )
-        assert r.status_code == 422, (
-            f"Expected 422 for oversized stdin, got {r.status_code}"
-        )
+        assert (
+            r.status_code == 422
+        ), f"Expected 422 for oversized stdin, got {r.status_code}"
 
     def test_stdin_too_long_ws_error(self):
         """WebSocket: stdin exceeding MAX_STDIN_CHARS characters returns an error message."""
@@ -1226,12 +1236,12 @@ class TestInputValidation:
                 return json.loads(raw)
 
         msg = _run(check())
-        assert msg["type"] == "error", (
-            f"Expected error message for oversized stdin, got type={msg['type']!r}"
-        )
-        assert str(MAX_STDIN_CHARS) in msg.get("message", ""), (
-            f"Error message does not mention the limit: {msg.get('message')!r}"
-        )
+        assert (
+            msg["type"] == "error"
+        ), f"Expected error message for oversized stdin, got type={msg['type']!r}"
+        assert str(MAX_STDIN_CHARS) in msg.get(
+            "message", ""
+        ), f"Error message does not mention the limit: {msg.get('message')!r}"
         assert_no_orphan_containers()
 
 
@@ -1353,10 +1363,16 @@ class TestStressAbuse:
             # keep alive past timeout
             "while True: pass\n",
         )
-        r = result_of(msgs)
-        assert r["status"] in ("timeout", "error")  # type: ignore
-        assert elapsed < _PYTHON_TIMEOUT + 10
-        assert len(stdout_of(msgs)) <= MAX_OUTPUT_CHARS + 100
+        err = error_of(msgs)
+        if err and err.get("reason") == "blocked":
+            # Successfully blocked upfront by the pre-execution risk analysis gate
+            assert err.get("risk", {}).get("decision") == "block"
+        else:
+            # Reached container execution; verify sandbox constraints applied
+            r = result_of(msgs)
+            assert r is not None and r["status"] in ("timeout", "error")
+            assert elapsed < _PYTHON_TIMEOUT + 10
+            assert len(stdout_of(msgs)) <= MAX_OUTPUT_CHARS + 100
         assert_no_orphan_containers()
 
 

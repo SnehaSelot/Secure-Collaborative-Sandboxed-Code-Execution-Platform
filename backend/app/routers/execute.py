@@ -7,6 +7,12 @@ GET  /health     — pool and service health summary
 GET  /languages  — list of supported languages
 GET  /limits     — per-language resource limits
 POST /execute    — run code synchronously, return full output
+
+POST /execute passes through the risk gate before any container is created:
+  allow -> runs normally (response unchanged)
+  flag  -> runs; response gains a "risk" object
+  block -> 403 {"status": "blocked", "risk": {...}}, nothing is executed
+  gate error with RISK_FAIL_CLOSED -> 503 {"status": "risk_unavailable", ...}
 """
 
 import asyncio
@@ -26,6 +32,7 @@ from app.services.executor import (
 )
 from app.core.docker_client import get_docker_client
 from app.core.pools import _executor_pool, _cleanup_pool
+from risk.analyzer import assess_and_record
 
 logger = logging.getLogger("exec-service")
 
@@ -53,6 +60,14 @@ class ExecuteResponse(BaseModel):
     exit_code: int | None
     status: str
     execution_time: float
+    # Present only when the risk gate flagged the code (decision == "flag").
+    # Allowed runs are unchanged, so existing clients see no difference.
+    risk: dict | None = None
+
+
+class BlockedResponse(BaseModel):
+    status: str  # "blocked" (policy) or "risk_unavailable" (analyzer error)
+    risk: dict
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +115,14 @@ async def limits():
     }
 
 
-@router.post("/execute", response_model=ExecuteResponse)
+@router.post(
+    "/execute",
+    response_model=ExecuteResponse,
+    responses={
+        403: {"model": BlockedResponse, "description": "Blocked by risk analysis"},
+        503: {"model": BlockedResponse, "description": "Risk analysis unavailable"},
+    },
+)
 async def execute(req: ExecuteRequest):
     if req.language not in LANGUAGE_IMAGES:
         raise HTTPException(
@@ -109,6 +131,21 @@ async def execute(req: ExecuteRequest):
         )
     if not req.code.strip():
         raise HTTPException(status_code=400, detail="Code cannot be empty")
+
+    # --- Risk gate -----------------------------------------------------------
+    # Shared with /ws/execute: all policy (thresholds, fail-closed, DB/audit
+    # writes) lives in risk.analyzer.  This router only maps the decision to
+    # HTTP.  Runs BEFORE get_docker_client()/the executor pool, so blocked
+    # code never reaches a container.  assess_and_record() never raises.
+    decision = await assess_and_record(req.code, req.language)
+    if decision.blocked:
+        return JSONResponse(
+            status_code=503 if decision.error else 403,
+            content={
+                "status": "risk_unavailable" if decision.error else "blocked",
+                "risk": decision.to_dict(),
+            },
+        )
 
     loop = asyncio.get_running_loop()
     client = get_docker_client()
@@ -123,5 +160,8 @@ async def execute(req: ExecuteRequest):
     except Exception:
         logger.exception("Unhandled error running code (language=%s)", req.language)
         raise HTTPException(status_code=500, detail="Internal error running code")
+
+    if decision.decision == "flag":
+        result = {**result, "risk": decision.to_dict()}
 
     return JSONResponse(result)
