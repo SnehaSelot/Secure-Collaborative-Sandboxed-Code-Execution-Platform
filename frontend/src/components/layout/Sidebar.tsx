@@ -47,15 +47,6 @@ const ICONS = {
       strokeLinejoin="round"
     />
   ),
-  admin: (
-    <path
-      d="M4 20V10M10 20V4M16 20v-7M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  ),
   settings: (
     <path
       d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M19.4 13a7.4 7.4 0 0 0 0-2l2-1.5-2-3.4-2.3.9a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 0 0-1.7 1l-2.3-.9-2 3.4L6.6 11a7.4 7.4 0 0 0 0 2l-2 1.5 2 3.4 2.3-.9c.5.4 1.1.75 1.7 1l.4 2.5h4l.4-2.5c.6-.25 1.2-.6 1.7-1l2.3.9 2-3.4-2-1.5Z"
@@ -83,7 +74,6 @@ const NAV_ITEMS: NavItem[] = [
  },
  { to: '/sessions', label: 'Sessions', icon: ICONS.sessions },
   { to: '/risk', label: 'Risk Analysis', icon: ICONS.risk },
-  { to: '/admin', label: 'Admin', icon: ICONS.admin, badge: 'Backend Required' },
 ];
 
 const BADGE_STYLES: Record<Badge, string> = {

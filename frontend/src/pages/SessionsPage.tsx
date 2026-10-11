@@ -67,10 +67,7 @@ export function SessionsPage() {
     <div className="flex h-full flex-col gap-4 p-6">
       <div>
         <h1 className="text-lg font-semibold text-neutral-100">Sessions</h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Local snapshots of your workspace, saved in this browser. Not shared with anyone —
-          multi-user session joining will need a backend workspace service.
-        </p>
+        <p className="mt-1 text-sm text-neutral-500">Workspace snapshots are saved locally in your browser. Shared changes are synchronized through the collaboration session.</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-neutral-900/60 p-4">

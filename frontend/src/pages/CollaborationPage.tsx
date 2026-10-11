@@ -46,6 +46,7 @@ import { FALLBACK_LANGUAGES } from '../config/constants';
 import { formatCode, isFormattable } from '../utils/formatCode';
 import type { ProviderSnapshot } from '../collaboration/provider';
 import type { CollabContext } from '../state/fileDocumentRegistry';
+import { useCollabStore } from '../state/collaborationStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,6 +162,7 @@ export function CollaborationPage() {
   const nodes = useWorkspaceStore((s) => s.nodes);
 
   const [pageState, setPageState] = useState<PageState>({ phase: 'idle' });
+  const [roomName, setRoomName] = useState('');
   const [enteredRoomId, setEnteredRoomId] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
@@ -256,6 +258,7 @@ export function CollaborationPage() {
           room: { session, files },
           activeFileId: files[0].id,
         });
+        useCollabStore.getState().setActiveSession(session, files, files[0].id);
       } catch (error) {
         if (requestId !== joinRequestRef.current) return;
         const message = extractErrorMessage(error);
@@ -276,49 +279,47 @@ export function CollaborationPage() {
     [activeFileId, nodes],
   );
 
+  const joinedSessionId = pageState.phase === 'joined' ? pageState.room.session.session_id : null;
+
   // ---------------------------------------------------------------------------
   // Auto-join when navigating to /collaboration/:roomId
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
     if (!routeRoomId || !user || !isValidRoomId(routeRoomId)) return;
-    if (pageState.phase === 'joined' && pageState.room.session.session_id === routeRoomId) return;
+    if (pageState.phase === 'joined' && joinedSessionId === routeRoomId) return;
     if (pageState.phase === 'loading') return;
 
     const timer = setTimeout(() => {
       void joinSession(routeRoomId, user.token);
     }, 0);
     return () => clearTimeout(timer);
-  }, [routeRoomId, user, joinSession, pageState.phase, pageState.phase === 'joined' ? pageState.room.session.session_id : null]);
+  }, [routeRoomId, user, joinSession, pageState.phase, joinedSessionId]);
 
   // File metadata changes are REST backed; refresh it so collaborators see
   // create, rename, and delete actions made by another participant.
   useEffect(() => {
-    if (pageState.phase !== 'joined' || !user) return;
-    const sessionId = pageState.room.session.session_id;
+    if (!joinedSessionId || !user) return;
+    const sessionId = joinedSessionId;
     const timer = window.setInterval(() => {
       void listCollabFiles(sessionId, user.token).then((files) => {
         setPageState((current) => {
           if (current.phase !== 'joined' || current.room.session.session_id !== sessionId) return current;
           const activeStillExists = files.some((file) => file.id === current.activeFileId);
           const mergedFiles = files.map((file) => ({ ...file, content: current.room.files.find((old) => old.id === file.id)?.content }));
+          useCollabStore.getState().setSessionFiles(mergedFiles);
           return { ...current, room: { ...current.room, files: mergedFiles }, activeFileId: activeStillExists ? current.activeFileId : files[0]?.id ?? '' };
         });
       }).catch(() => { /* transient polling errors are surfaced by the active provider/API action */ });
     }, 4000);
     return () => window.clearInterval(timer);
-  }, [pageState.phase === 'joined' ? pageState.room.session.session_id : null, user?.token]);
+  }, [joinedSessionId, user]);
 
   useEffect(() => {
-    if (pageState.phase !== 'joined') return;
-    exitStartedRef.current = false;
-    setIsExiting(false);
-    const file = pageState.room.files.find((item) => item.id === pageState.activeFileId);
-    if (file?.language) setRunLanguage(file.language);
-  }, [
-    pageState.phase === 'joined' ? pageState.room.session.session_id : null,
-    pageState.phase === 'joined' ? pageState.activeFileId : null,
-  ]);
+    if (pageState.phase === 'joined') {
+      exitStartedRef.current = false;
+    }
+  }, [pageState.phase]);
 
   // ---------------------------------------------------------------------------
   // Create a new collaboration room
@@ -326,6 +327,8 @@ export function CollaborationPage() {
 
   const handleCreateRoom = async () => {
     if (!user) return;
+    const trimmedRoomName = roomName.trim();
+    if (!trimmedRoomName) return;
 
     setPageState({ phase: 'loading', message: 'Creating collaboration session…' });
     try {
@@ -333,11 +336,7 @@ export function CollaborationPage() {
       const sessionFileLanguage = activeFile?.language && (FALLBACK_LANGUAGES as readonly string[]).includes(activeFile.language)
         ? activeFile.language
         : null;
-      const sessionName = activeFile?.name
-        ? `Session: ${activeFile.name}`
-        : `Session ${new Date().toLocaleDateString()}`;
-
-      const session = await createCollabSession(sessionName, user.token);
+      const session = await createCollabSession(trimmedRoomName, user.token);
       await joinCollabSession(session.session_id, user.token);
 
       // F5: Create the active file in the session
@@ -358,6 +357,7 @@ export function CollaborationPage() {
         room: { session, files: [file] },
         activeFileId: file.id,
       });
+      useCollabStore.getState().setActiveSession(session, [file], file.id);
     } catch (error) {
       setPageState({
         phase: 'error',
@@ -451,13 +451,17 @@ export function CollaborationPage() {
       try {
         if (fileDialog === 'rename' && activeFile) {
           const updated = await renameCollabFile(room.session.session_id, activeFile.id, path, user.token);
-          setPageState((prev) => prev.phase === 'joined' ? { ...prev, room: { ...prev.room, files: prev.room.files.map((f) => f.id === updated.id ? updated : f) } } : prev);
+          const nextFiles = room.files.map((f) => f.id === updated.id ? updated : f);
+          useCollabStore.getState().setSessionFiles(nextFiles);
+          setPageState((prev) => prev.phase === 'joined' ? { ...prev, room: { ...prev.room, files: nextFiles } } : prev);
         } else {
           const detectedLanguage = detectLanguageFromFilename(path);
           const language = detectedLanguage && (FALLBACK_LANGUAGES as readonly string[]).includes(detectedLanguage) ? detectedLanguage : null;
           const starter = language ? getLanguageTemplate(language) : '';
           const newFile = await createCollabFile(room.session.session_id, path, language, starter, user.token);
-          setPageState((prev) => prev.phase === 'joined' ? { ...prev, room: { ...prev.room, files: [...prev.room.files, newFile] }, activeFileId: newFile.id } : prev);
+          const nextFiles = [...room.files, newFile];
+          useCollabStore.getState().setActiveSession(room.session, nextFiles, newFile.id);
+          setPageState((prev) => prev.phase === 'joined' ? { ...prev, room: { ...prev.room, files: nextFiles }, activeFileId: newFile.id } : prev);
         }
         setFileDialog(null);
         setFileError(null);
@@ -484,6 +488,7 @@ export function CollaborationPage() {
           const def = await createCollabFile(room.session.session_id, 'main.py', 'python', starter, user.token);
           remaining.push({ ...def, content: starter });
         }
+        useCollabStore.getState().setSessionFiles(remaining);
         setPageState((prev) =>
           prev.phase === 'joined'
             ? {
@@ -503,6 +508,7 @@ export function CollaborationPage() {
 
     const openSharedFile = async (fileId: string) => {
       setFileError(null);
+      useCollabStore.getState().setActiveFileId(fileId);
       try {
         const detail = await getCollabFile(room.session.session_id, fileId, user.token);
         setPageState((prev) => prev.phase === 'joined' ? {
@@ -585,6 +591,7 @@ export function CollaborationPage() {
               // Exiting the room must still work when storage is unavailable.
             }
             window.dispatchEvent(new Event('glasshouse:collaboration-exited'));
+            useCollabStore.getState().clearActiveSession();
             navigate('/collaboration', { replace: true });
             setPageState({ phase: 'idle' });
             void leaveCollabSession(room.session.session_id, user.token)
@@ -714,16 +721,28 @@ export function CollaborationPage() {
       <section className="rounded-lg border border-white/10 bg-neutral-900/60 p-4">
         <h2 className="text-sm font-medium text-neutral-200">Create a collaboration room</h2>
         <p className="mt-1 text-xs text-neutral-500">
-          Creates a new session with the active file and gives you a share link.
+          Choose a room name. A new session will include the active file and provide a share link.
           Anyone with the link can join the same room.
         </p>
+        <label htmlFor="collaboration-room-name" className="mt-3 block text-xs text-neutral-400">
+          Room name
+        </label>
+        <input
+          id="collaboration-room-name"
+          type="text"
+          value={roomName}
+          onChange={(event) => setRoomName(event.target.value)}
+          maxLength={255}
+          placeholder="e.g. Algorithms review"
+          className="mt-1 w-full rounded-md border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:border-emerald-500/50"
+        />
         <button
           type="button"
           onClick={() => void handleCreateRoom()}
-          disabled={!activeFile}
+          disabled={!activeFile || !roomName.trim()}
           className="mt-3 rounded-md bg-emerald-500 px-4 py-1.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Create room for active file
+          Create room
         </button>
         {!activeFile && (
           <p className="mt-2 text-xs text-neutral-600">

@@ -184,21 +184,21 @@ export function OutputPanel() {
         aria-labelledby="terminal-stdin-heading"
         className="shrink-0 rounded-lg border border-white/10 bg-neutral-900/60 p-3"
       >
-        <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-          <label
-            id="terminal-stdin-heading"
-            htmlFor="terminal-stdin"
-            className="font-mono text-xs font-medium tracking-wide text-neutral-400 uppercase"
-          >
-            Input (stdin)
-          </label>
-          <p className="text-xs text-neutral-500">
-            Enter input before clicking Run. Input cannot be changed while the program is running.
-          </p>
-        </div>
-        <div className="mb-1 flex justify-end">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <label
+              id="terminal-stdin-heading"
+              htmlFor="terminal-stdin"
+              className="font-mono text-xs font-medium tracking-wide text-neutral-300 uppercase"
+            >
+              Input (stdin)
+            </label>
+            <p className="mt-1 text-[11px] leading-4 text-neutral-500">
+              Input is passed to your program when you click Run.
+            </p>
+          </div>
           {stdin.length > 0 && (
-            <span className="font-mono text-xs text-neutral-600">
+            <span className="shrink-0 font-mono text-[10px] text-neutral-600">
               {stdin.length.toLocaleString()} / {MAX_STDIN_CHARS.toLocaleString()}
             </span>
           )}
@@ -209,10 +209,10 @@ export function OutputPanel() {
           onChange={(e) => setStdin(e.target.value)}
           disabled={isRunning}
           maxLength={MAX_STDIN_CHARS}
-          placeholder="Optional — each line becomes one input() the program reads"
+          placeholder="Enter program input here..."
           rows={3}
           spellCheck={false}
-          className="w-full resize-y rounded border border-white/10 bg-neutral-950 px-2 py-1 font-mono text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:border-emerald-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full resize-y rounded-md border border-white/10 bg-neutral-950 px-3 py-2 font-mono text-xs leading-5 text-neutral-200 outline-none placeholder:text-xs placeholder:text-neutral-600 focus:border-emerald-500/50 disabled:cursor-not-allowed disabled:opacity-50"
         />
       </section>
 

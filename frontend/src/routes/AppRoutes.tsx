@@ -1,18 +1,13 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { MainLayout } from '../layouts/MainLayout';
 import { EditorPage } from '../pages/EditorPage';
-import { ComingSoonPage } from '../pages/ComingSoonPage';
 import { RiskAnalysisPage } from '../pages/RiskAnalysisPage';
 import { SessionsPage } from '../pages/SessionsPage';
 import { SettingsPage } from '../pages/SettingsPage';
 import { ProfilePage } from '../pages/ProfilePage';
 import { CollaborationPage } from '../pages/CollaborationPage';
 
-/**
- * Central route table. Every route unavailable-by-backend renders
- * ComingSoonPage instead of a real feature — no fake API calls happen
- * on these routes.
- */
+/** Central route table for the application pages. */
 export function AppRoutes() {
   return (
     <Routes>
@@ -27,16 +22,6 @@ export function AppRoutes() {
           element={<CollaborationPage />}
         />
         <Route path="/risk" element={<RiskAnalysisPage />} />
-        <Route
-          path="/admin"
-          element={
-            <ComingSoonPage
-              title="Admin Dashboard"
-              description="Execution stats, audit logs, and user management require the admin and audit backend services."
-              badge="Backend Required"
-            />
-          }
-        />
         <Route path="*" element={<Navigate to="/editor" replace />} />
       </Route>
     </Routes>
