@@ -13,11 +13,19 @@ import { useExecutionStore } from '../state/executionStore';
  * stdin is read from executionStore (filled in by the Terminal's stdin
  * field — see OutputPanel.tsx) and sent once, upfront. See the TODO in
  * api/streamExecution.ts for what live/mid-run stdin would need.
+ *
+ * Risk gate integration:
+ *   - onRiskWarning: the backend flagged the code but allowed execution.
+ *     Adds a "risk" terminal line and stores the payload in riskWarning.
+ *   - onError with reason="blocked": the backend blocked execution.
+ *     Stores the payload in blockedByRisk so OutputPanel can render details.
  */
 export function useStreamExecution() {
   const startExecution = useExecutionStore((s) => s.startExecution);
   const setResult = useExecutionStore((s) => s.setResult);
   const setError = useExecutionStore((s) => s.setError);
+  const setBlockedByRisk = useExecutionStore((s) => s.setBlockedByRisk);
+  const setRiskWarning = useExecutionStore((s) => s.setRiskWarning);
   const resetExecution = useExecutionStore((s) => s.resetExecution);
   const addTerminalLine = useExecutionStore((s) => s.addTerminalLine);
   const setTruncated = useExecutionStore((s) => s.setTruncated);
@@ -48,10 +56,28 @@ export function useStreamExecution() {
             status: result.status,
             execution_time: result.execution_time,
           }),
-        onError: (message) => setError(message),
+        onError: (message, reason, risk) => {
+          if (reason === 'blocked' && risk) {
+            // Execution was blocked by the risk gate — store the risk payload
+            // so OutputPanel can show detailed findings.
+            setBlockedByRisk(risk);
+          } else {
+            setError(message);
+          }
+        },
+        onRiskWarning: (risk) => {
+          // Code was flagged but execution continues — surface a visible warning.
+          setRiskWarning(risk);
+          const score = risk.score ?? '?';
+          const count = risk.findings?.length ?? 0;
+          addTerminalLine(
+            'risk',
+            `⚠ Risk warning: score ${score}/100 — ${count} finding${count !== 1 ? 's' : ''} (execution allowed)`,
+          );
+        },
       });
     },
-    [startExecution, setResult, setError, addTerminalLine, setTruncated],
+    [startExecution, setResult, setError, setBlockedByRisk, setRiskWarning, addTerminalLine, setTruncated],
   );
 
   const cancel = useCallback(() => {

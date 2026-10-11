@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import type { ExecuteResponse } from '../api/types';
+import type { RiskAnalysisResponse } from '../api/riskAnalysis';
 
 interface TerminalLine {
-  type: 'output' | 'input' | 'error' | 'info';
+  type: 'output' | 'input' | 'error' | 'info' | 'risk';
   text: string;
 }
 
@@ -10,6 +11,10 @@ interface ExecutionState {
   isRunning: boolean;
   result: ExecuteResponse | null;
   error: string | null;
+  /** Set when execution was blocked by the risk gate (reason === "blocked") */
+  blockedByRisk: Partial<RiskAnalysisResponse> | null;
+  /** Set when the risk gate flags code but allows execution to proceed */
+  riskWarning: Partial<RiskAnalysisResponse> | null;
   lastCode: string | null;
   lastLanguage: string | null;
   /** Terminal's stdin field value. Sent once, upfront, by useStreamExecution's
@@ -25,6 +30,8 @@ interface ExecutionState {
   startExecution: (code: string, language: string, retainOutput?: boolean) => void;
   setResult: (result: ExecuteResponse) => void;
   setError: (error: string) => void;
+  setBlockedByRisk: (risk: Partial<RiskAnalysisResponse>) => void;
+  setRiskWarning: (risk: Partial<RiskAnalysisResponse>) => void;
   resetExecution: () => void;
   setStdin: (stdin: string) => void;
   addTerminalLine: (type: TerminalLine['type'], text: string) => void;
@@ -36,6 +43,8 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
   isRunning: false,
   result: null,
   error: null,
+  blockedByRisk: null,
+  riskWarning: null,
   lastCode: null,
   lastLanguage: null,
   stdin: '',
@@ -48,6 +57,8 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
       isRunning: true,
       error: null,
       result: null,
+      blockedByRisk: null,
+      riskWarning: null,
       lastCode: code,
       lastLanguage: language,
       terminalLines: retainOutput ? state.terminalLines : [],
@@ -61,8 +72,22 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
   setError: (error) =>
     set({ isRunning: false, error, result: null }),
 
+  setBlockedByRisk: (risk) =>
+    set({ isRunning: false, blockedByRisk: risk, error: null, result: null }),
+
+  setRiskWarning: (risk) =>
+    set({ riskWarning: risk }),
+
   resetExecution: () =>
-    set({ isRunning: false, result: null, error: null, lastCode: null, lastLanguage: null }),
+    set({
+      isRunning: false,
+      result: null,
+      error: null,
+      blockedByRisk: null,
+      riskWarning: null,
+      lastCode: null,
+      lastLanguage: null,
+    }),
 
   // Deliberately does not touch isRunning/result/error — this is just
   // the stdin field and should survive a run/Clear untouched.

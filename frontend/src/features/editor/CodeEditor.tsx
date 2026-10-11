@@ -151,6 +151,22 @@ export function CodeEditor({
               );
               bindingRef.current = binding;
             }
+
+            // Expose a goToLine helper to the Risk Analysis page via a
+            // CustomEvent. The Risk Analysis page listens for "monaco-ready"
+            // and stores the callback for finding navigation clicks.
+            window.dispatchEvent(
+              new CustomEvent('monaco-ready', {
+                detail: {
+                  fileId,
+                  goToLine: (line: number) => {
+                    instance.revealLineInCenter(line);
+                    instance.setPosition({ lineNumber: line, column: 1 });
+                    instance.focus();
+                  },
+                },
+              }),
+            );
           }}
           options={{
             ...getEditorDisplayOptions({
