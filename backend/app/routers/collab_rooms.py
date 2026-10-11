@@ -1,4 +1,4 @@
-﻿"""
+"""
 app/routers/collab_rooms.py — Collaboration session (room) REST endpoints.
 
 A "room" is a (session_id, file_id) pair. Sessions are owned by a user and
@@ -41,7 +41,9 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 class CreateSessionRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255, description="Human-readable session name")
+    name: str = Field(
+        ..., min_length=1, max_length=255, description="Human-readable session name"
+    )
 
 
 class SessionResponse(BaseModel):
@@ -66,7 +68,9 @@ async def _require_session(session_id: str) -> dict:
     """Fetch session or raise 404."""
     sess = await get_session(session_id)
     if sess is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
     return sess
 
 
@@ -74,7 +78,9 @@ async def _require_owner(session_id: str, user: CollabUser) -> dict:
     """Fetch session and assert caller is owner, raise 403 otherwise."""
     sess = await _require_session(session_id)
     if sess["owner_id"] != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not the session owner")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not the session owner"
+        )
     return sess
 
 
@@ -91,8 +97,8 @@ async def create_session_endpoint(
     """Create a new collaboration session. The caller becomes the owner."""
     sess = await create_session(owner_id=user.id, name=req.name)
     return SessionResponse(
-        session_id=sess["id"],
-        owner_id=sess["owner_id"],
+        session_id=str(sess["id"]),
+        owner_id=str(sess["owner_id"]),
         name=sess["name"],
         status=sess["status"],
     )
@@ -112,8 +118,8 @@ async def get_session_endpoint(
             detail="Not a member of this session",
         )
     return SessionResponse(
-        session_id=sess["id"],
-        owner_id=sess["owner_id"],
+        session_id=str(sess["id"]),
+        owner_id=str(sess["owner_id"]),
         name=sess["name"],
         status=sess["status"],
     )
