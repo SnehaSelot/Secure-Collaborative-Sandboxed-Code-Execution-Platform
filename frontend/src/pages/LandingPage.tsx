@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../state/authStore';
+import DottedSurface from '../components/ui/dotted-surface';
 import {
   ArrowRight,
   BrainCircuit,
@@ -107,12 +108,13 @@ export function LandingPage() {
 
   return (
     <main>
-      <section id="home" className="relative border-b border-white/[0.07]">
+      <section id="home" className="relative isolate overflow-hidden border-b border-white/[0.07]">
+        <DottedSurface className="z-0 opacity-45" size={7} opacity={0.48} sizeAttenuation vertexColors />
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           <div className="absolute -top-48 left-[35%] h-[500px] w-[500px] rounded-full bg-emerald-500/[0.06] blur-[100px]" />
           <div className="absolute bottom-0 right-0 h-px w-2/3 bg-gradient-to-l from-emerald-300/20 to-transparent" />
         </div>
-        <div className="relative mx-auto grid max-w-[1440px] items-center gap-14 px-5 py-16 sm:px-8 sm:py-20 lg:grid-cols-[0.82fr_1.18fr] lg:gap-12 lg:px-12 lg:py-20">
+        <div className="relative z-10 mx-auto grid max-w-[1440px] items-center gap-14 px-5 py-16 sm:px-8 sm:py-20 lg:grid-cols-[0.82fr_1.18fr] lg:gap-12 lg:px-12 lg:py-20">
           <div className="max-w-[560px]">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/[0.06] px-3 py-1.5 text-[11px] font-medium tracking-wide text-emerald-300">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Secure <span className="text-emerald-300/40">·</span> Collaborative <span className="text-emerald-300/40">·</span> AI-Powered
@@ -174,14 +176,14 @@ export function LandingPage() {
             </div>
           </div>
           <div className="relative mx-auto flex min-h-[290px] w-full max-w-[540px] items-center justify-center">
-            <div className="absolute h-56 w-56 rounded-full bg-emerald-400/[0.08] blur-[75px]" />
-            <div className="relative flex h-48 w-48 items-center justify-center rounded-[42px] border border-emerald-300/25 bg-gradient-to-br from-emerald-300/[0.12] to-[#071117] shadow-[0_0_80px_rgba(16,185,129,0.08)]">
-              <div className="absolute inset-4 rounded-[34px] border border-emerald-300/15" />
-              <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-emerald-300/30 bg-emerald-300/[0.08] text-emerald-300"><Shield size={42} strokeWidth={1.35} /></div>
-              <span className="absolute -top-4 left-1/2 -translate-x-1/2 rounded-full border border-emerald-300/25 bg-[#071117] px-3 py-1.5 text-[10px] text-emerald-200">Isolated containers</span>
-              <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-emerald-300/25 bg-[#071117] px-3 py-1.5 text-[10px] text-emerald-200">Configured execution controls</span>
-              <span className="absolute -left-9 top-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-[#071117] px-3 py-1.5 text-[10px] text-neutral-400">Network restrictions</span>
-              <span className="absolute -right-7 top-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-[#071117] px-3 py-1.5 text-[10px] text-neutral-400">Risk analysis</span>
+            <div className="absolute h-[232px] w-[232px] rounded-full bg-emerald-400/[0.08] blur-[75px]" />
+            <div className="gh-why-ring-outer relative flex h-48 w-48 items-center justify-center rounded-[42px] border border-emerald-300/25 bg-gradient-to-br from-emerald-300/[0.12] to-[#071117] shadow-[0_0_80px_rgba(16,185,129,0.08)]">
+              <div className="gh-why-ring-inner absolute inset-[22px] rounded-[34px] border border-emerald-300/15" />
+              <div className="gh-why-shield flex h-20 w-20 items-center justify-center rounded-2xl border border-emerald-300/30 bg-emerald-300/[0.08] text-emerald-300"><Shield className="gh-why-shield-icon" size={46} strokeWidth={1.35} /></div>
+              <span className="gh-why-tag gh-why-tag-top rounded-full border border-emerald-300/25 bg-[#071117] px-3 py-1.5 text-[10px] text-emerald-200">Isolated containers</span>
+              <span className="gh-why-tag gh-why-tag-bottom whitespace-nowrap rounded-full border border-emerald-300/25 bg-[#071117] px-3 py-1.5 text-[10px] text-emerald-200">Configured execution controls</span>
+              <span className="gh-why-tag gh-why-tag-left rounded-full border border-white/10 bg-[#071117] px-3 py-1.5 text-[10px] text-neutral-400">Network restrictions</span>
+              <span className="gh-why-tag gh-why-tag-right rounded-full border border-white/10 bg-[#071117] px-3 py-1.5 text-[10px] text-neutral-400">Risk analysis</span>
             </div>
           </div>
         </div>
