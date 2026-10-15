@@ -25,7 +25,8 @@ CREATE TABLE users (
     email         TEXT NOT NULL UNIQUE,
     display_name  TEXT NOT NULL,
     password_hash TEXT,                          -- null if Cognito-only
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    profile_photo_key TEXT
 );
 
 CREATE TABLE roles (

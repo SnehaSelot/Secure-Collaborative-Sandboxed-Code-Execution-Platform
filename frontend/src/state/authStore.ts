@@ -18,12 +18,18 @@ export interface AuthUser {
   id: string;
   /** Display name shown to collaborators */
   displayName: string;
+  /** Email used for the successful login, when known by the client. */
+  email?: string;
+  roles?: string[];
+  createdAt?: string;
+  photoUrl?: string | null;
   /** JWT token for WebSocket authentication */
   token: string;
 }
 
 interface AuthState {
   user: AuthUser | null;
+  adminVerified: boolean;
   isLoading: boolean;
   error: string | null;
 
@@ -35,6 +41,8 @@ interface AuthState {
   logout: () => void;
   /** Manually set user (e.g. for testing or token refresh) */
   setUser: (user: AuthUser | null) => void;
+  setAdminVerified: (verified: boolean) => void;
+  updateProfile: (profile: { id: string; displayName: string; email: string; roles: string[]; createdAt: string; photoUrl: string | null }) => void;
 }
 
 interface LoginResponse {
@@ -47,6 +55,7 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       user: null,
+      adminVerified: false,
       isLoading: false,
       error: null,
 
@@ -59,7 +68,8 @@ export const useAuthStore = create<AuthState>()(
           });
           const { access_token, user_id, display_name } = response.data;
           set({
-            user: { id: user_id, displayName: display_name, token: access_token },
+            user: { id: user_id, displayName: display_name, email: email.trim().toLowerCase(), token: access_token },
+            adminVerified: false,
             isLoading: false,
             error: null,
           });
@@ -89,12 +99,28 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
-        set({ user: null, error: null });
+        set({ user: null, adminVerified: false, error: null });
+        try {
+          window.sessionStorage.removeItem('glasshouse:last-collaboration-room');
+        } catch {
+          // Continue clearing UI state even when browser storage is unavailable.
+        }
+        try {
+          window.dispatchEvent(new Event('glasshouse:account-logged-out'));
+          window.dispatchEvent(new Event('glasshouse:collaboration-exited'));
+        } catch {
+          // Auth state still clears when browser event dispatch is unavailable.
+        }
       },
 
       setUser: (user) => {
-        set({ user });
+        set({ user, adminVerified: false });
       },
+
+      setAdminVerified: (verified) => set({ adminVerified: verified }),
+      updateProfile: (profile) => set((state) => state.user?.id !== profile.id ? state : ({
+        user: { ...state.user, ...profile },
+      })),
     }),
     {
       name: 'glasshouse-auth',

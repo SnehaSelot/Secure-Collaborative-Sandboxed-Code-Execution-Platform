@@ -26,3 +26,7 @@ models/
 ml/data/
 *.tar
 *.jsonl
+
+# User-uploaded profile photos
+backend/profile_uploads/*
+!backend/profile_uploads/.gitkeep

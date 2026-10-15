@@ -76,6 +76,7 @@ async def seed_roles() -> None:
     """Insert default roles and languages if they do not exist yet."""
     factory = get_session_factory()
     async with factory() as session:
+        await session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo_key TEXT"))
         for name in ("admin", "reviewer", "member"):
             await session.execute(
                 text(
@@ -137,6 +138,40 @@ async def get_user_by_id(user_id: str) -> dict | None:
         if r is None:
             return None
         return dict(r._mapping)
+
+
+async def get_user_profile(user_id: str) -> dict | None:
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(text(
+            "SELECT u.id, u.email, u.display_name, u.created_at, u.profile_photo_key, "
+            "COALESCE(array_agg(r.name) FILTER (WHERE r.name IS NOT NULL), ARRAY[]::text[]) AS roles "
+            "FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id "
+            "LEFT JOIN roles r ON r.id = ur.role_id WHERE u.id = :id "
+            "GROUP BY u.id"
+        ), {"id": user_id})
+        row = result.fetchone()
+        return dict(row._mapping) if row else None
+
+
+async def update_user_display_name(user_id: str, display_name: str) -> dict | None:
+    factory = get_session_factory()
+    async with factory() as session:
+        await session.execute(text(
+            "UPDATE users SET display_name = :name WHERE id = :id"
+        ), {"id": user_id, "name": display_name})
+        await session.commit()
+    return await get_user_profile(user_id)
+
+
+async def update_user_photo_key(user_id: str, photo_key: str) -> dict | None:
+    factory = get_session_factory()
+    async with factory() as session:
+        await session.execute(text(
+            "UPDATE users SET profile_photo_key = :photo_key WHERE id = :id"
+        ), {"id": user_id, "photo_key": photo_key})
+        await session.commit()
+    return await get_user_profile(user_id)
 
 
 async def create_user(email: str, display_name: str, password_hash: str) -> dict:

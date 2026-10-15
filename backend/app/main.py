@@ -47,6 +47,7 @@ from app.routers import (
     risk_router,
     ws_collab,
     ws_execute,
+    user_router,
 )
 from app.routers.ws_collab import DbStateStore, set_state_store
 from app.services.reaper import start_reaper, stop_reaper
@@ -115,6 +116,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router.router)
+app.include_router(user_router.router)
 app.include_router(collab_rooms.router)
 app.include_router(collab_files.router)
 app.include_router(execute.router)

@@ -16,6 +16,7 @@ import { getFileRoomName, getSessionFileRoomName } from '../config/collaboration
 import { createProvider, type CollaborationProvider } from '../collaboration/provider';
 import { colorForName } from '../collaboration/presence';
 import { useWorkspaceStore } from './workspaceStore';
+import { useAuthStore } from './authStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,9 +83,15 @@ function replaceText(text: Y.Text, value: string): void {
   });
 }
 
+function soloRoomKey(fileId: string): string {
+  const accountId = useAuthStore.getState().user?.id ?? 'guest';
+  return `private:${encodeURIComponent(accountId)}:${fileId}`;
+}
+
 useWorkspaceStore.subscribe((state) => {
   for (const entry of documents.values()) {
     if (entry.references === 0 || !entry.initialized || entry.isCollab) continue;
+    if (entry.roomKey !== soloRoomKey(entry.fileId)) continue;
 
     const node = state.nodes[entry.fileId];
     if (node?.type === 'file') {
@@ -117,6 +124,7 @@ async function initializeDocument(
   entry.initialized = true;
 
   if (!isCollab) {
+    if (entry.roomKey !== soloRoomKey(entry.fileId)) return persistenceError;
     const file = useWorkspaceStore.getState().nodes[entry.fileId];
     if (file?.type === 'file') {
       if (hasDocumentHistory) {
@@ -197,7 +205,7 @@ function createDocument(fileId: string, collabContext?: CollabContext): FileDocu
   // IndexedDB persistence — keyed by roomKey to avoid sharing IDB between solo and collab
   const roomKey = collabContext
     ? `${collabContext.sessionId}:${fileId}`
-    : fileId;
+    : soloRoomKey(fileId);
 
   let persistence: IndexeddbPersistence | null = null;
   let creationError: Error | null = null;
@@ -228,7 +236,7 @@ function createDocument(fileId: string, collabContext?: CollabContext): FileDocu
     cleanupVersion: 0,
     isCollab,
     onTextChange: () => {
-      if (!entry.initialized || isCollab) return;
+      if (!entry.initialized || isCollab || entry.roomKey !== soloRoomKey(fileId)) return;
 
       const content = text.toString();
       const file = useWorkspaceStore.getState().nodes[fileId];
@@ -262,7 +270,7 @@ export function acquireFileDocument(
 ): FileDocumentLease {
   const roomKey = collabContext
     ? `${collabContext.sessionId}:${fileId}`
-    : fileId;
+    : soloRoomKey(fileId);
 
   let entry = documents.get(roomKey);
   if (!entry) {
@@ -321,15 +329,15 @@ export function acquireFileDocument(
  * Works for both solo and collab documents.
  */
 export function getFileDocumentContent(fileId: string, sessionId?: string): string | null {
-  const roomKey = sessionId ? `${sessionId}:${fileId}` : fileId;
-  const entry = documents.get(roomKey) ?? documents.get(fileId);
+  const roomKey = sessionId ? `${sessionId}:${fileId}` : soloRoomKey(fileId);
+  const entry = documents.get(roomKey);
   if (!entry?.initialized) return null;
   return entry.text.toString();
 }
 
 /** Update a solo or collaborative Yjs document by its canonical identity. */
 export function setFileDocumentContent(fileId: string, content: string, sessionId?: string): boolean {
-  const roomKey = sessionId ? `${sessionId}:${fileId}` : fileId;
+  const roomKey = sessionId ? `${sessionId}:${fileId}` : soloRoomKey(fileId);
   const entry = documents.get(roomKey);
   if (!entry) return false;
   const current = entry.text.toString();
@@ -339,4 +347,19 @@ export function setFileDocumentContent(fileId: string, content: string, sessionI
     if (content) entry.text.insert(0, content);
   });
   return true;
+}
+
+
+// Detach solo docs in memory on logout, while preserving each account's
+// IndexedDB records and all shared collaboration documents.
+if (typeof window !== 'undefined') {
+  window.addEventListener('glasshouse:account-logged-out', () => {
+    for (const [key, entry] of documents) {
+      if (entry.isCollab) continue;
+      entry.text.unobserve(entry.onTextChange);
+      entry.provider.destroy();
+      entry.doc.destroy();
+      documents.delete(key);
+    }
+  });
 }

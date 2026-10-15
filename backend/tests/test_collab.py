@@ -398,6 +398,22 @@ class TestCollabStats:
         )
         assert resp.status_code == 401
 
+    def test_stats_expired_token_rejected(self, client):
+        from jose import jwt
+        from app.config import get_settings
+
+        settings = get_settings()
+        expired_token = jwt.encode(
+            {"sub": OWNER_ID, "name": "Owner", "exp": datetime(2000, 1, 1, tzinfo=timezone.utc)},
+            settings.COLLAB_JWT_SECRET,
+            algorithm="HS256",
+        )
+        response = client.get(
+            self._stats_url(),
+            headers={"Authorization": f"Bearer {expired_token}"},
+        )
+        assert response.status_code == 401
+
 
 # ===========================================================================
 # Security, Logging & Configuration Tests

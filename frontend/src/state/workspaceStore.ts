@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import { getLanguageTemplate, detectLanguageFromFilename } from '../config/languageTemplates';
 import { DEFAULT_LANGUAGE } from '../config/constants';
 import { usePreferencesStore } from './preferencesStore';
@@ -27,8 +26,11 @@ export interface FileSystemNode {
 }
 
 interface WorkspaceState {
+  accountId: string | null;
   nodes: Record<string, FileSystemNode>;
   activeFileId: string | null;
+  activateAccount: (accountId: string | null) => void;
+  clearActiveAccount: () => void;
 
   createFile: (parentId: string | null, name: string) => string;
   createFolder: (parentId: string | null, name: string) => string;
@@ -88,10 +90,32 @@ function seedWorkspace(): { nodes: Record<string, FileSystemNode>; activeFileId:
   return { nodes: { [mainId]: mainFile }, activeFileId: mainId };
 }
 
+const workspaceStorageKey = (accountId: string | null) =>
+  `glasshouse-workspace:${accountId ? encodeURIComponent(accountId) : 'guest'}`;
+
+function readWorkspace(accountId: string | null) {
+  try {
+    const raw = localStorage.getItem(workspaceStorageKey(accountId));
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<WorkspaceState>;
+      if (parsed.nodes && typeof parsed.nodes === 'object') {
+        return { nodes: parsed.nodes, activeFileId: parsed.activeFileId ?? null };
+      }
+    }
+  } catch { /* Start with a clean workspace if stored data is unreadable. */ }
+  return seedWorkspace();
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()(
-  persist(
     (set, get) => ({
+      accountId: null,
       ...seedWorkspace(),
+
+      activateAccount: (accountId) => {
+        if (get().accountId === accountId) return;
+        set({ accountId, ...readWorkspace(accountId) });
+      },
+      clearActiveAccount: () => set({ accountId: null, ...seedWorkspace() }),
 
       createFile: (parentId, name) => {
         const id = makeId();
@@ -241,6 +265,21 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         });
       },
     }),
-    { name: 'glasshouse-workspace' },
-  ),
 );
+
+// Persist only into the active account namespace. The legacy global key is
+// deliberately left untouched because its owner cannot be determined safely.
+useWorkspaceStore.subscribe((state) => {
+  try {
+    localStorage.setItem(workspaceStorageKey(state.accountId), JSON.stringify({
+      nodes: state.nodes,
+      activeFileId: state.activeFileId,
+    }));
+  } catch { /* Keep editor changes in memory if storage is unavailable. */ }
+});
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('glasshouse:account-logged-out', () => {
+    useWorkspaceStore.getState().clearActiveAccount();
+  });
+}
