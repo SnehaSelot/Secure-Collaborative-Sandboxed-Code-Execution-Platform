@@ -28,3 +28,7 @@ ml/data/
 *.jsonl
 
 artifacts/system_design_architecture.md
+
+# User-uploaded profile photos
+backend/profile_uploads/*
+!backend/profile_uploads/.gitkeep

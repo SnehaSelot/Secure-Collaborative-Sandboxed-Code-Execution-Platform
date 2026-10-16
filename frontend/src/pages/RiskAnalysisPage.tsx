@@ -452,6 +452,7 @@ export function RiskAnalysisPage() {
               Active Room
             </span>
             <span className="font-medium text-neutral-200">{activeSession.name}</span>
+            <span className="text-xs text-neutral-400">({sessionFiles.length} shared files)</span>
           </div>
 
           <Link

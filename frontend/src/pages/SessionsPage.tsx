@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSessionsStore } from '../state/sessionsStore';
 import { useWorkspaceStore } from '../state/workspaceStore';
 import { useConfirmDialogStore } from '../state/confirmDialogStore';
 import { useToastStore } from '../state/toastStore';
+import { useAuthStore } from '../state/authStore';
 
 function formatTimestamp(ms: number): string {
   return new Date(ms).toLocaleString();
@@ -18,7 +19,11 @@ function formatTimestamp(ms: number): string {
  * window.confirm), and every successful action pushes a toast.
  */
 export function SessionsPage() {
-  const sessions = useSessionsStore((s) => s.sessions);
+  const storedSessions = useSessionsStore((s) => s.sessions);
+  const sessionsAccountId = useSessionsStore((s) => s.accountId);
+  const activateAccount = useSessionsStore((s) => s.activateAccount);
+  const user = useAuthStore((s) => s.user);
+  const sessions = sessionsAccountId === user?.id ? storedSessions : [];
   const saveSession = useSessionsStore((s) => s.saveSession);
   const restoreSession = useSessionsStore((s) => s.restoreSession);
   const deleteSession = useSessionsStore((s) => s.deleteSession);
@@ -29,6 +34,10 @@ export function SessionsPage() {
   const addToast = useToastStore((s) => s.addToast);
 
   const [name, setName] = useState('');
+
+  useEffect(() => {
+    activateAccount(user?.id ?? null);
+  }, [activateAccount, user?.id]);
 
   const handleSave = () => {
     const trimmed = name.trim() || `Session ${new Date().toLocaleString()}`;

@@ -87,32 +87,35 @@ export function Sidebar() {
   // that nothing else needs stays as useState here). Nothing else reads
   // whether the sidebar is collapsed, so it isn't a Zustand store.
   const [collapsed, setCollapsed] = useState(false);
-  const [lastRoomId, setLastRoomId] = useState<string | null>(() => {
+  const { pathname } = useLocation();
+  const match = pathname.match(/^\/collaboration\/([^/]+)\/?$/);
+  const currentRoomId = match ? decodeURIComponent(match[1]) : null;
+
+  const [persistedRoomId, setPersistedRoomId] = useState<string | null>(() => {
     try {
       return sessionStorage.getItem('glasshouse:last-collaboration-room');
     } catch {
       return null;
     }
   });
-  const { pathname } = useLocation();
 
   useEffect(() => {
-    const clearLastRoom = () => setLastRoomId(null);
+    const clearLastRoom = () => setPersistedRoomId(null);
     window.addEventListener('glasshouse:collaboration-exited', clearLastRoom);
     return () => window.removeEventListener('glasshouse:collaboration-exited', clearLastRoom);
   }, []);
 
   useEffect(() => {
-    const match = pathname.match(/^\/collaboration\/([^/]+)\/?$/);
-    if (!match) return;
+    if (!currentRoomId) return;
     try {
-      const roomId = decodeURIComponent(match[1]);
-      sessionStorage.setItem('glasshouse:last-collaboration-room', roomId);
-      setLastRoomId(roomId);
+      sessionStorage.setItem('glasshouse:last-collaboration-room', currentRoomId);
     } catch {
       // Keep navigation functional when session storage is unavailable.
     }
-  }, [pathname]);
+  }, [currentRoomId]);
+
+  const lastRoomId = currentRoomId || persistedRoomId;
+
 
   return (
     <aside

@@ -10,6 +10,8 @@ docker>=7.1
 pydantic>=2.7
 pydantic-settings>=2.2
 email-validator
+python-multipart>=0.0.9
+Pillow>=10.0
 
 # CRDT / Real-time collaboration (Yjs)
 pycrdt>=0.12.0
