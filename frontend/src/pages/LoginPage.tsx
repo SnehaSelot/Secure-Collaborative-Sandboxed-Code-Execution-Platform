@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AlertCircle, Eye, EyeOff, LoaderCircle, LockKeyhole } from 'lucide-react';
 import axios from 'axios';
@@ -11,6 +11,7 @@ export function LoginPage({ adminMode = false }: { adminMode?: boolean }) {
   const login = useAuthStore((state) => state.login);
   const logout = useAuthStore((state) => state.logout);
   const setAdminVerified = useAuthStore((state) => state.setAdminVerified);
+  const setUser = useAuthStore((state) => state.setUser);
   const user = useAuthStore((state) => state.user);
   const location = useLocation();
   const navigate = useNavigate();
@@ -20,14 +21,56 @@ export function LoginPage({ adminMode = false }: { adminMode?: boolean }) {
   const [rolePreference, setRolePreference] = useState<'user' | 'admin'>(adminMode ? 'admin' : 'user');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const hasResolvedUser = useRef(false);
   const state = location.state as LoginLocationState | null;
   const isAdminFlow = adminMode || rolePreference === 'admin';
+  const editorDestination = state?.from || '/editor';
+
+  const resolveUserDestination = useCallback(async (requireAdmin: boolean) => {
+    const authenticatedUser = useAuthStore.getState().user;
+    if (!authenticatedUser || hasResolvedUser.current) return;
+    hasResolvedUser.current = true;
+    const headers = { Authorization: `Bearer ${authenticatedUser.token}` };
+    try {
+      const { data: profile } = await apiClient.get<{ roles: string[] }>('/users/me', { headers });
+      const roles = Array.isArray(profile.roles) ? profile.roles : [];
+      setUser({ ...authenticatedUser, roles });
+
+      if (!roles.includes('admin')) {
+        if (requireAdmin) {
+          logout();
+          setError('This account does not have administrator access.');
+        } else {
+          navigate(editorDestination, { replace: true });
+        }
+        return;
+      }
+
+      await apiClient.get('/admin/access', { headers });
+      setAdminVerified(true);
+      navigate('/admin', { replace: true });
+    } catch (requestError) {
+      const status = axios.isAxiosError(requestError) ? requestError.response?.status : undefined;
+      if (requireAdmin && status === 403) {
+        logout();
+        setError('This account does not have administrator access.');
+      } else if (status === 401) {
+        logout();
+        setError('Your session could not be verified. Please sign in again.');
+      } else if (!requireAdmin) {
+        navigate(editorDestination, { replace: true });
+      } else {
+        setError('Administrator access could not be verified. Please try again later.');
+      }
+      hasResolvedUser.current = false;
+    }
+  }, [editorDestination, logout, navigate, setAdminVerified, setUser]);
 
   useEffect(() => {
-    if (user && !adminMode) {
-      navigate(state?.from || '/editor', { replace: true });
-    }
-  }, [user, adminMode, navigate, state]);
+    if (!user || adminMode || loading) return;
+    const timer = window.setTimeout(() => { void resolveUserDestination(false); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [user, adminMode, loading, resolveUserDestination]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -35,22 +78,10 @@ export function LoginPage({ adminMode = false }: { adminMode?: boolean }) {
     setLoading(true);
     try {
       await login(email, password);
-      if (isAdminFlow) {
-        try {
-          const token = useAuthStore.getState().user?.token;
-          await apiClient.get('/collab/stats', { headers: { Authorization: `Bearer ${token}` } });
-          setAdminVerified(true);
-          navigate('/admin', { replace: true });
-        } catch (adminError) {
-          logout();
-          const status = axios.isAxiosError(adminError) ? adminError.response?.status : undefined;
-          setError(status === 403 ? 'This account does not have administrator access.' : 'Administrator access could not be verified. Please try again later.');
-        }
-      } else {
-        navigate(state?.from || '/editor', { replace: true });
-      }
+      await resolveUserDestination(isAdminFlow);
     } catch (requestError) {
       setError(extractErrorMessage(requestError));
+      hasResolvedUser.current = false;
     } finally {
       setLoading(false);
     }

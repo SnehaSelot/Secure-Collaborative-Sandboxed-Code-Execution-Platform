@@ -1,5 +1,5 @@
 export const env = {
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000',
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000',
   /**
    * BACKEND INTEGRATION:
    * Points at the /ws/execute streaming endpoint (see
@@ -7,7 +7,7 @@ export const env = {
    * swapping the scheme, so there's still only one URL to configure.
    * Status: Available (backend), consumed by hooks/useStreamExecution.ts.
    */
-  wsBaseUrl: (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(
+  wsBaseUrl: (import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000').replace(
     /^http/,
     'ws',
   ),
@@ -19,7 +19,7 @@ export const env = {
    * Default: ws://localhost:8000/ws/collab
    */
   collaborationWsBaseUrl: import.meta.env.VITE_COLLABORATION_WS_URL ??
-    (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000')
+    (import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000')
       .replace(/^http/, 'ws')
       .replace(/\/$/, '') + '/ws/collab',
 } as const;

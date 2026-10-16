@@ -1,4 +1,4 @@
-﻿"""
+"""
 app/routers/auth_router.py — Authentication endpoints.
 
 Routes
@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app import auth
-from app.db import create_user, get_user_by_email
+from app.db import create_user, get_user_by_email, get_user_roles
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -58,6 +58,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user_id: str
     display_name: str
+    roles: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -82,10 +83,12 @@ async def signup(req: SignupRequest):
         password_hash=hashed,
     )
     token = auth.create_access_token(user["id"], user["display_name"])
+    roles = await get_user_roles(user["id"])
     return TokenResponse(
         access_token=token,
         user_id=user["id"],
         display_name=user["display_name"],
+        roles=roles,
     )
 
 
@@ -99,9 +102,13 @@ async def login(req: LoginRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
-    token = auth.create_access_token(str(user["id"]), user["display_name"])
+    user_id = str(user["id"])
+    token = auth.create_access_token(user_id, user["display_name"])
+    roles = await get_user_roles(user_id)
     return TokenResponse(
         access_token=token,
-        user_id=str(user["id"]),
+        user_id=user_id,
         display_name=user["display_name"],
+        roles=roles,
     )
+

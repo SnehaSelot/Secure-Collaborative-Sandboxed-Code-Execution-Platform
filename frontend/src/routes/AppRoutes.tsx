@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { MainLayout } from '../layouts/MainLayout';
+import { AdminLayout } from '../layouts/AdminLayout';
 import { EditorPage } from '../pages/EditorPage';
 import { RiskAnalysisPage } from '../pages/RiskAnalysisPage';
 import { SessionsPage } from '../pages/SessionsPage';
@@ -12,6 +13,7 @@ import { RegisterPage } from '../pages/RegisterPage';
 import { PublicLayout } from '../components/layout/PublicLayout';
 import { AdminPage } from '../pages/AdminPage';
 import { RequireAuth } from './RequireAuth';
+import { RequireAdmin } from './RequireAdmin';
 
 /** Central route table for the application pages. */
 export function AppRoutes() {
@@ -27,7 +29,6 @@ export function AppRoutes() {
         <Route path="/editor" element={<EditorPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/admin" element={<AdminPage />} />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route
           path="/collaboration/:roomId?"
@@ -36,7 +37,12 @@ export function AppRoutes() {
         <Route path="/risk" element={<RiskAnalysisPage />} />
         <Route path="/risk-analysis" element={<RiskAnalysisPage />} />
       </Route>
+      <Route element={<RequireAuth><RequireAdmin><AdminLayout /></RequireAdmin></RequireAuth>}>
+        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/admin/:section" element={<AdminPage />} />
+      </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
+

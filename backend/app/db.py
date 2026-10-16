@@ -217,6 +217,22 @@ async def user_has_role(user_id: str, role_name: str) -> bool:
         return row.fetchone() is not None
 
 
+async def get_user_roles(user_id: str) -> list[str]:
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            text(
+                "SELECT r.name FROM user_roles ur "
+                "JOIN roles r ON r.id = ur.role_id "
+                "WHERE ur.user_id = :user_id "
+                "ORDER BY r.id"
+            ),
+            {"user_id": user_id},
+        )
+        return [row[0] for row in result.fetchall()]
+
+
+
 # ---------------------------------------------------------------------------
 # Session (room) CRUD
 # ---------------------------------------------------------------------------

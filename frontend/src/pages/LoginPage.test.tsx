@@ -1,40 +1,48 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { LoginPage } from './LoginPage';
-import { useAuthStore } from '../state/authStore';
 import { apiClient } from '../api/client';
+import { useAuthStore } from '../state/authStore';
+import { LoginPage } from './LoginPage';
 
-describe('login page', () => {
-  beforeEach(() => {
-    useAuthStore.setState({ user: null, adminVerified: false, isLoading: false, error: null });
-  });
+describe('login role redirects', () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+  beforeEach(() => useAuthStore.setState({ user: null, adminVerified: false, isLoading: false, error: null }));
 
-  it('uses the existing login contract and returns to the intended route', async () => {
-    const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { access_token: 'test-token', user_id: 'user-id', display_name: 'Ada' } } as never);
-    render(<MemoryRouter initialEntries={[{ pathname: '/login', state: { from: { pathname: '/sessions' } } }]}><Routes><Route path="/login" element={<LoginPage />} /><Route path="/sessions" element={<p>Sessions destination</p>} /></Routes></MemoryRouter>);
-
-    fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'ADA@example.com' } });
-    fireEvent.change(screen.getByPlaceholderText(/enter your password/i), { target: { value: 'password123' } });
+  const submitLogin = async () => {
+    fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'person@example.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Enter your password'), { target: { value: 'password123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  };
 
-    await screen.findByText('Sessions destination');
-    expect(post).toHaveBeenCalledWith('/auth/login', { email: 'ada@example.com', password: 'password123' });
-    expect(useAuthStore.getState().user).toMatchObject({ id: 'user-id', displayName: 'Ada', token: 'test-token' });
-    post.mockRestore();
+  it('routes a database-backed admin role to the admin dashboard', async () => {
+    vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { access_token: 'admin-token', user_id: 'admin-id', display_name: 'Admin' } } as never);
+    vi.spyOn(apiClient, 'get').mockImplementation((url) => Promise.resolve({ data: url === '/users/me' ? { roles: ['admin'] } : { authorized: true } }) as never);
+    render(<MemoryRouter initialEntries={['/login']}><Routes><Route path="/login" element={<LoginPage />} /><Route path="/admin" element={<p>Admin dashboard</p>} /><Route path="/editor" element={<p>Editor workspace</p>} /></Routes></MemoryRouter>);
+    await submitLogin();
+    await waitFor(() => expect(screen.getByText('Admin dashboard')).toBeTruthy());
+    expect(useAuthStore.getState().adminVerified).toBe(true);
   });
 
-  it('renders useful API errors and does not grant admin access from the role preference', async () => {
-    vi.spyOn(apiClient, 'post').mockRejectedValueOnce({ isAxiosError: true, response: { status: 401, data: { detail: 'Invalid credentials' } } });
-    render(<MemoryRouter><LoginPage /></MemoryRouter>);
-    fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'user@example.com' } });
-    fireEvent.change(screen.getByPlaceholderText(/enter your password/i), { target: { value: 'incorrect' } });
+  it('keeps standard users in the editor workspace flow', async () => {
+    vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { access_token: 'member-token', user_id: 'member-id', display_name: 'Member' } } as never);
+    vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { roles: ['member'] } } as never);
+    render(<MemoryRouter initialEntries={['/login']}><Routes><Route path="/login" element={<LoginPage />} /><Route path="/admin" element={<p>Admin dashboard</p>} /><Route path="/editor" element={<p>Editor workspace</p>} /></Routes></MemoryRouter>);
+    await submitLogin();
+    await waitFor(() => expect(screen.getByText('Editor workspace')).toBeTruthy());
+    expect(screen.queryByText('Admin dashboard')).toBeNull();
+  });
+
+  it('does not grant a standard user admin access when Admin is selected', async () => {
+    vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { access_token: 'member-token', user_id: 'member-id', display_name: 'Member' } } as never);
+    vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { roles: ['member'] } } as never);
+    render(<MemoryRouter initialEntries={['/login']}><Routes><Route path="/login" element={<LoginPage />} /><Route path="/admin" element={<p>Admin dashboard</p>} /><Route path="/editor" element={<p>Editor workspace</p>} /></Routes></MemoryRouter>);
     fireEvent.click(screen.getByLabelText('Admin'));
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/invalid credentials/i));
-    expect(useAuthStore.getState().adminVerified).toBe(false);
-    vi.restoreAllMocks();
+    await submitLogin();
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('does not have administrator access'));
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(screen.queryByText('Admin dashboard')).toBeNull();
   });
 });

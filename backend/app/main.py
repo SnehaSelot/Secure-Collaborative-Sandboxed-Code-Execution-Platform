@@ -1,4 +1,4 @@
-﻿"""
+"""
 app/main.py — Execution Service entrypoint.
 
 Routes live in app/routers/, shared state in app/core/, tuneables in app/config.py.
@@ -32,8 +32,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.auth import CollabUser, get_current_user
 from app.config import _WS_ALLOWED_ORIGINS, get_settings, validate_startup_config
@@ -44,6 +45,7 @@ from app.routers import (
     collab_files,
     collab_rooms,
     execute,
+    admin_router,
     risk_router,
     ws_collab,
     ws_execute,
@@ -115,7 +117,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled server error: %s", exc)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "An internal server error occurred."},
+    )
+
+
 app.include_router(auth_router.router)
+app.include_router(admin_router.router)
 app.include_router(user_router.router)
 app.include_router(collab_rooms.router)
 app.include_router(collab_files.router)
