@@ -26,3 +26,5 @@ models/
 ml/data/
 *.tar
 *.jsonl
+
+artifacts/system_design_architecture.md
