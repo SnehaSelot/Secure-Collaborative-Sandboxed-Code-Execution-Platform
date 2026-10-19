@@ -77,6 +77,16 @@ async def seed_roles() -> None:
     factory = get_session_factory()
     async with factory() as session:
         await session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo_key TEXT"))
+        await session.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL "
+            "DEFAULT 'active' CHECK (account_status IN ('active', 'disabled'))"
+        ))
+        # Execution metrics include anonymous/standalone runs, so these context
+        # references are optional. Keep this idempotent startup migration in
+        # sync with schema.sql and migrations/20261019_execution_metrics.sql.
+        await session.execute(text("ALTER TABLE executions ALTER COLUMN session_id DROP NOT NULL"))
+        await session.execute(text("ALTER TABLE executions ALTER COLUMN triggered_by DROP NOT NULL"))
+        await session.execute(text("ALTER TABLE executions ALTER COLUMN language_id DROP NOT NULL"))
         for name in ("admin", "reviewer", "member"):
             await session.execute(
                 text(
@@ -116,7 +126,7 @@ async def get_user_by_email(email: str) -> dict | None:
     async with factory() as session:
         row = await session.execute(
             text(
-                "SELECT id, email, display_name, password_hash "
+                "SELECT id, email, display_name, password_hash, account_status "
                 "FROM users WHERE lower(email) = lower(:email)"
             ),
             {"email": email},
@@ -125,6 +135,16 @@ async def get_user_by_email(email: str) -> dict | None:
         if r is None:
             return None
         return dict(r._mapping)
+
+
+async def get_user_account_status(user_id: str) -> str | None:
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            text("SELECT account_status FROM users WHERE id = :id"), {"id": user_id}
+        )
+        row = result.fetchone()
+        return row[0] if row else None
 
 
 async def get_user_by_id(user_id: str) -> dict | None:

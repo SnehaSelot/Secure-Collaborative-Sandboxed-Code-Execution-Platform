@@ -331,6 +331,34 @@ async def close_room_for_file(file_id: str, code: int = 4404, reason: str = "Fil
             logger.info("Closed collab room %s for deleted file %s", room.room_id, file_id)
 
 
+async def close_rooms_for_session(
+    session_id: str, code: int = 4410, reason: str = "Session terminated by administrator"
+) -> None:
+    """Close all active in-memory rooms for this session and disconnect all participants."""
+    async with _registry_lock:
+        to_close = [r for rid, r in _rooms.items() if rid.startswith(f"{session_id}:")]
+        for room in to_close:
+            room.cancel_eviction()
+            room._stop_snapshot_loop()
+            if room.dirty:
+                try:
+                    await room.save()
+                except Exception:
+                    logger.exception(
+                        "Failed to flush snapshot for room %s during session termination",
+                        room.room_id,
+                    )
+            for c in list(room.clients):
+                c.dropped = True
+                asyncio.ensure_future(_safe_close(c.ws, code, reason))
+            _rooms.pop(room.room_id, None)
+            logger.info(
+                "Closed collab room %s on termination of session %s",
+                room.room_id,
+                session_id,
+            )
+
+
 async def _join_room(room_id: str, client: _Client) -> _Room | None:
     """Fetch (or create + load) the room and add the client; None if full."""
     async with _registry_lock:
@@ -488,7 +516,12 @@ async def _get_current_user_ws(token: str) -> CollabUser | None:
     if not token:
         return None
     try:
-        return verify_token(token)
+        user = verify_token(token)
+        from app.db import get_user_account_status
+
+        if await get_user_account_status(user.id) != "active":
+            return None
+        return user
     except HTTPException:
         return None
 

@@ -82,6 +82,17 @@ def reset_collab_state():
     _rooms.clear()
 
 
+@pytest.fixture(autouse=True)
+def mock_account_status():
+    """Default account status to active so unit tests don't hit the database."""
+    with (
+        patch("app.db.get_user_account_status", new=AsyncMock(return_value="active")),
+        patch("app.db.get_user_roles", new=AsyncMock(return_value=["member"])),
+        patch("app.routers.auth_router.get_user_roles", new=AsyncMock(return_value=["member"])),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Helper: create a JWT token for a user
 # ---------------------------------------------------------------------------

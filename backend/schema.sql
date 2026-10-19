@@ -26,7 +26,9 @@ CREATE TABLE users (
     display_name  TEXT NOT NULL,
     password_hash TEXT,                          -- null if Cognito-only
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    profile_photo_key TEXT
+    profile_photo_key TEXT,
+    account_status TEXT NOT NULL DEFAULT 'active'
+        CHECK (account_status IN ('active', 'disabled'))
 );
 
 CREATE TABLE roles (
@@ -85,10 +87,10 @@ CREATE TABLE files (
 -- ---------- Executions ----------
 CREATE TABLE executions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id      UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    session_id      UUID REFERENCES sessions(id) ON DELETE CASCADE,
     file_id         UUID REFERENCES files(id) ON DELETE SET NULL,
-    triggered_by    UUID NOT NULL REFERENCES users(id),
-    language_id     SMALLINT NOT NULL REFERENCES languages(id),
+    triggered_by    UUID REFERENCES users(id),
+    language_id     SMALLINT REFERENCES languages(id),
     container_id    TEXT,                        -- only place container_id lives
     status          TEXT NOT NULL DEFAULT 'queued'
                     CHECK (status IN ('queued','running','completed','failed','timeout','blocked')),

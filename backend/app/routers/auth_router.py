@@ -102,6 +102,11 @@ async def login(req: LoginRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+    if user.get("account_status", "active") != "active":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
     user_id = str(user["id"])
     token = auth.create_access_token(user_id, user["display_name"])
     roles = await get_user_roles(user_id)

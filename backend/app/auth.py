@@ -130,7 +130,17 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return verify_token(credentials.credentials)
+    user = verify_token(credentials.credentials)
+    from app.db import get_user_account_status
+
+    account_status = await get_user_account_status(user.id)
+    if account_status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account is disabled or unavailable",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 
 async def get_current_user_ws(token: str) -> CollabUser | None:

@@ -15,7 +15,12 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
     if (!user) return;
     let active = true;
     apiClient.get('/admin/access', { headers: { Authorization: `Bearer ${user.token}` } })
-      .then(() => { if (active) setResult({ token: user.token, state: 'allowed' }); })
+      .then(() => {
+        if (active) {
+          useAuthStore.getState().setAdminVerified(true);
+          setResult({ token: user.token, state: 'allowed' });
+        }
+      })
       .catch((error: unknown) => {
         if (!active) return;
         if (axios.isAxiosError(error) && error.response?.status === 401) {

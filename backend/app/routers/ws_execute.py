@@ -43,6 +43,7 @@ from app.services.executor import (
     ContainerHolder,
 )
 from app.services.sandbox_control import kill_container
+from app.services.execution_metrics import begin_execution, finish_execution
 from risk.analyzer import assess_and_record
 
 logger = logging.getLogger("exec-service")
@@ -125,6 +126,10 @@ async def ws_execute(websocket: WebSocket):
         await websocket.close()
         return
 
+    # Persist only aggregate-safe execution metadata; source and output remain
+    # in memory for the run and are never written to the database.
+    execution_id = await begin_execution(language)
+
     # --- 3b. Risk gate --------------------------------------------------------
     # Same shared gate as POST /execute (risk.analyzer): all policy lives
     # there; this handler only maps the decision onto WS messages.  It runs
@@ -133,6 +138,7 @@ async def ws_execute(websocket: WebSocket):
     decision = await assess_and_record(code, language)
     try:
         if decision.blocked:
+            await finish_execution(execution_id, "blocked", None)
             unavailable = bool(decision.error)
             await websocket.send_json(
                 {
@@ -150,13 +156,18 @@ async def ws_execute(websocket: WebSocket):
             await websocket.send_json({"type": "risk", "risk": decision.to_dict()})
     except WebSocketDisconnect:
         # Client left during the gate; nothing has been started yet.
+        await finish_execution(execution_id, "failed", None)
         return
 
     # --- 4. Set up queue and container holder --------------------------------
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue(maxsize=_WS_QUEUE_MAXSIZE)
     holder = ContainerHolder()
-    client = get_docker_client()
+    try:
+        client = get_docker_client()
+    except Exception:
+        await finish_execution(execution_id, "failed", None)
+        raise
 
     def emit(msg: dict) -> None:
         """Called from the worker thread; schedules a queue put on the loop.
@@ -299,12 +310,13 @@ async def ws_execute(websocket: WebSocket):
     # Skip if the client already disconnected — the socket is gone and the
     # send would raise WebSocketDisconnect anyway.  The container has already
     # been killed by _drain() in that path.
-    if disconnect_requested:
-        return
-
     exit_code, status, execution_time = worker_result
     if timeout_requested:
         status = "timeout"
+    await finish_execution(execution_id, status, exit_code)
+
+    if disconnect_requested:
+        return
 
     try:
         await websocket.send_json(

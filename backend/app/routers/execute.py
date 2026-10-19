@@ -32,6 +32,7 @@ from app.services.executor import (
 )
 from app.core.docker_client import get_docker_client
 from app.core.pools import _executor_pool, _cleanup_pool
+from app.services.execution_metrics import begin_execution, finish_execution
 from risk.analyzer import assess_and_record
 
 logger = logging.getLogger("exec-service")
@@ -132,6 +133,10 @@ async def execute(req: ExecuteRequest):
     if not req.code.strip():
         raise HTTPException(status_code=400, detail="Code cannot be empty")
 
+    # Persist only the minimal fields needed by aggregate admin metrics.
+    # The service is best-effort and never stores source or execution output.
+    execution_id = await begin_execution(req.language)
+
     # --- Risk gate -----------------------------------------------------------
     # Shared with /ws/execute: all policy (thresholds, fail-closed, DB/audit
     # writes) lives in risk.analyzer.  This router only maps the decision to
@@ -139,6 +144,7 @@ async def execute(req: ExecuteRequest):
     # code never reaches a container.  assess_and_record() never raises.
     decision = await assess_and_record(req.code, req.language)
     if decision.blocked:
+        await finish_execution(execution_id, "blocked", None)
         return JSONResponse(
             status_code=503 if decision.error else 403,
             content={
@@ -148,19 +154,21 @@ async def execute(req: ExecuteRequest):
         )
 
     loop = asyncio.get_running_loop()
-    client = get_docker_client()
-
     try:
+        client = get_docker_client()
         result = await loop.run_in_executor(
             _executor_pool,
             functools.partial(run_code, client, req.language, req.code, req.stdin),
         )
     except ValueError as e:
+        await finish_execution(execution_id, "failed", None)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         logger.exception("Unhandled error running code (language=%s)", req.language)
+        await finish_execution(execution_id, "failed", None)
         raise HTTPException(status_code=500, detail="Internal error running code")
 
+    await finish_execution(execution_id, result.get("status", "failed"), result.get("exit_code"))
     if decision.decision == "flag":
         result = {**result, "risk": decision.to_dict()}
 

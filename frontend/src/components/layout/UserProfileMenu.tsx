@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ChevronDown, LogOut, ShieldCheck, UserRound } from 'lucide-react';
 import { useAuthStore } from '../../state/authStore';
 import { fetchMyProfilePhoto, getMyProfile } from '../../api/profile';
+import { apiClient } from '../../api/client';
 
 function initials(name: string | undefined) {
   return name?.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'GH';
@@ -34,7 +35,13 @@ export function UserProfileMenu() {
     if (user?.token) {
       let active = true;
       void getMyProfile(user.token).then((profile) => {
-        if (active) updateProfile({ id: profile.user_id, displayName: profile.display_name, email: profile.email, roles: profile.roles, createdAt: profile.created_at, photoUrl: profile.profile_photo_url });
+        if (!active) return;
+        updateProfile({ id: profile.user_id, displayName: profile.display_name, email: profile.email, roles: profile.roles, createdAt: profile.created_at, photoUrl: profile.profile_photo_url });
+        if (profile.roles?.includes('admin')) {
+          apiClient.get('/admin/access', { headers: { Authorization: `Bearer ${user.token}` } })
+            .then(() => { if (active) useAuthStore.getState().setAdminVerified(true); })
+            .catch(() => { if (active) useAuthStore.getState().setAdminVerified(false); });
+        }
       }).catch(() => undefined);
       return () => { active = false; };
     }

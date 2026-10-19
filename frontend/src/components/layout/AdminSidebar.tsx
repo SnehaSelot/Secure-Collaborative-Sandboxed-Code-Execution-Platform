@@ -7,9 +7,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Radio,
-  Shield,
-  ShieldAlert,
-  Terminal,
   Users,
 } from 'lucide-react';
 
@@ -23,9 +20,7 @@ interface AdminNavItem {
 const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { to: '/admin', label: 'Overview', icon: Activity, end: true },
   { to: '/admin/sessions', label: 'Session Monitoring', icon: Radio },
-  { to: '/admin/executions', label: 'Execution History', icon: Terminal },
   { to: '/admin/audit', label: 'Audit Trail', icon: FileText },
-  { to: '/admin/flagged', label: 'Flagged Events / Risk Review', icon: ShieldAlert },
   { to: '/admin/users', label: 'User Directory', icon: Users },
 ];
 
@@ -38,23 +33,6 @@ export function AdminSidebar() {
         collapsed ? 'w-16' : 'w-64'
       }`}
     >
-      {/* Admin console indicator */}
-      <div className="border-b border-white/10 px-4 py-3">
-        <div className={`flex items-center gap-2.5 ${collapsed ? 'justify-center' : ''}`}>
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-400">
-            <Shield size={16} />
-          </div>
-          {!collapsed && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
-                Administration
-              </p>
-              <p className="text-[11px] text-neutral-500">Security & Governance</p>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Navigation items */}
       <nav className="flex-1 space-y-1 p-3">
         {ADMIN_NAV_ITEMS.map((item) => {
