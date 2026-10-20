@@ -31,7 +31,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.config import _WS_ALLOWED_ORIGINS, _WS_QUEUE_MAXSIZE
+from app.config import is_allowed_origin, _WS_QUEUE_MAXSIZE
 from app.core.docker_client import get_docker_client
 from app.core.pools import _executor_pool, _cleanup_pool
 from app.services.executor import (
@@ -75,7 +75,7 @@ async def ws_execute(websocket: WebSocket):
     """
     # --- 1. Accept & origin check -------------------------------------------
     origin = websocket.headers.get("origin", "")
-    if origin and origin not in _WS_ALLOWED_ORIGINS:
+    if origin and not is_allowed_origin(origin):
         await websocket.close(code=4003, reason="Origin not allowed")
         return
 

@@ -45,7 +45,7 @@ from app.config import (
     COLLAB_MAX_MESSAGE_BYTES,
     COLLAB_MAX_ROOM_CLIENTS,
     COLLAB_ROOM_IDLE_SECONDS,
-    _WS_ALLOWED_ORIGINS,
+    is_allowed_origin,
     get_settings,
 )
 from app.db import (
@@ -535,7 +535,7 @@ async def _get_current_user_ws(token: str) -> CollabUser | None:
 async def ws_collab(websocket: WebSocket, room_id: str, token: str = ""):
     # B1: configurable origin check (before accept)
     origin = websocket.headers.get("origin", "")
-    if origin and origin not in _WS_ALLOWED_ORIGINS:
+    if origin and not is_allowed_origin(origin):
         await websocket.close(code=_CLOSE_BAD_ORIGIN, reason="Origin not allowed")
         return
 

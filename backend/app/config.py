@@ -36,16 +36,19 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     # CORS / WebSocket origin allow-list  (B1)
     # -----------------------------------------------------------------------
-    # Comma-separated list of origins allowed to open the WebSocket.
-    # CORS middleware does not cover WS, so we validate the Origin header
-    # explicitly inside the handler.  Also used by CORS middleware for HTTP.
-    COLLAB_ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
-
-    @property
-    def collab_allowed_origins_set(self) -> frozenset[str]:
-        return frozenset(
-            o.strip() for o in self.COLLAB_ALLOWED_ORIGINS.split(",") if o.strip()
-        )
+    # Regex matched against the full Origin header value (scheme + host + port).
+    # Covers localhost and all RFC-1918 private ranges so the app works on any
+    # LAN without editing config.  Override via env var for custom deployments.
+    # CORS middleware uses this via allow_origin_regex=; the WS handlers call
+    # is_allowed_origin() which compiles and caches the same pattern.
+    COLLAB_ALLOWED_ORIGIN_REGEX: str = (
+        r"https?://"
+        r"(localhost|127\.\d+\.\d+\.\d+|"
+        r"10\.\d+\.\d+\.\d+|"
+        r"192\.168\.\d+\.\d+|"
+        r"172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)"
+        r"(:\d+)?"
+    )
 
     # -----------------------------------------------------------------------
     # Database
@@ -89,7 +92,9 @@ class Settings(BaseSettings):
     # resolved against the service working directory, so prefer an absolute
     # path (or set it in .env) when running under Docker / a process manager.
     RISK_MODEL_PATH: str = Field(
-        default_factory=lambda: __import__("risk.engine", fromlist=["get_default_model_path"]).get_default_model_path()
+        default_factory=lambda: __import__(
+            "risk.engine", fromlist=["get_default_model_path"]
+        ).get_default_model_path()
     )
     # Static fallback thresholds (0-100 scale). The analyzer may override
     # these from system_settings (risk_flag_threshold / risk_block_threshold);
@@ -188,9 +193,19 @@ def validate_startup_config(s: Settings | None = None) -> None:
 # Module-level aliases so existing imports continue to work unchanged.
 # ---------------------------------------------------------------------------
 
+import re as _re
+
 settings = get_settings()
 
-_WS_ALLOWED_ORIGINS: frozenset[str] = settings.collab_allowed_origins_set
+# Compiled once at import time from the settings value.
+_WS_ORIGIN_RE: _re.Pattern[str] = _re.compile(
+    settings.COLLAB_ALLOWED_ORIGIN_REGEX
+)
+
+
+def is_allowed_origin(origin: str) -> bool:
+    """Return True when *origin* matches the configured private-network regex."""
+    return bool(_WS_ORIGIN_RE.fullmatch(origin))
 
 EXECUTOR_POOL_MAX_WORKERS: int = settings.EXECUTOR_POOL_MAX_WORKERS
 CLEANUP_POOL_MAX_WORKERS: int = settings.CLEANUP_POOL_MAX_WORKERS

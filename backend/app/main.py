@@ -37,7 +37,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.auth import CollabUser, get_current_user
-from app.config import _WS_ALLOWED_ORIGINS, get_settings, validate_startup_config
+from app.config import get_settings, validate_startup_config, _WS_ORIGIN_RE
 from app.db import close_engine, get_engine, seed_roles, user_has_role
 from app.logging_filters import apply_token_redaction_filter
 from app.routers import (
@@ -111,7 +111,7 @@ app = FastAPI(title="Execution Service", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=sorted(_WS_ALLOWED_ORIGINS),
+    allow_origin_regex=_WS_ORIGIN_RE.pattern,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
