@@ -79,7 +79,7 @@ apt-get install -y \
     docker.io \
     postgresql postgresql-contrib \
     nginx \
-    python3.12 python3.12-venv python3-pip \
+    python3 python3-venv python3-pip \
     git curl build-essential libpq-dev
 
 # Node.js 22.x (for building the frontend)
@@ -183,7 +183,7 @@ fi
 # 7. Python venv + backend dependencies
 # ---------------------------------------------------------------------------
 info "Creating Python virtual environment..."
-python3.12 -m venv "${VENV_DIR}"
+python3 -m venv "${VENV_DIR}"
 "${VENV_DIR}/bin/pip" install --upgrade pip
 "${VENV_DIR}/bin/pip" install -r "${PROJECT_DIR}/backend/requirements.txt"
 info "Python dependencies installed ✓"
